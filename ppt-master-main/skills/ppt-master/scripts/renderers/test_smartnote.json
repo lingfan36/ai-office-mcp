@@ -1,0 +1,75 @@
+{
+  "meta": { "title": "SmartNote AI 产品路演" },
+  "slides": [
+    {
+      "id": "cover", "layout": "cover", "page": "01/06",
+      "tag": "AI · 笔记 · 知识管理",
+      "title": "SmartNote AI",
+      "subtitle": "让每一条笔记，都成为可检索的知识资产",
+      "subtitle2": "语义理解 · 自动结构化 · 跨平台同步",
+      "badge": "Product Demo · 2026"
+    },
+    {
+      "id": "pain", "layout": "hero_stat", "page": "02/06",
+      "title": "知识工作者的核心痛点：记了，但找不到",
+      "hero_number": "73", "hero_unit": "%",
+      "hero_label": "知识工作者表示：曾记录过某信息，但事后无法找回（MIT 研究数据）",
+      "columns": [
+        { "title": "碎片化记录", "body": "笔记散落在微信/文档/便签\n无法形成整体知识体系" },
+        { "title": "检索效率低", "body": "关键词搜索失败率 60%\n语义相近却无法命中" },
+        { "title": "回顾成本高", "body": "定期整理耗时 3-5 小时/周\n大多数人最终放弃" }
+      ]
+    },
+    {
+      "id": "capability", "layout": "hub_spoke", "page": "03/06",
+      "title": "六大 AI 能力，覆盖知识管理全生命周期",
+      "hub": { "title": "语义\n引擎" },
+      "spokes": [
+        { "title": "智能摘要", "body": "一键提炼长文核心观点" },
+        { "title": "语义搜索", "body": "自然语言描述即可定位笔记" },
+        { "title": "自动标签", "body": "AI 识别主题，自动归类" },
+        { "title": "知识图谱", "body": "笔记间关联可视化呈现" },
+        { "title": "跨平台同步", "body": "iOS · Android · Web · 微信小程序" },
+        { "title": "协作共享", "body": "团队知识库实时协同编辑" }
+      ]
+    },
+    {
+      "id": "market", "layout": "kpi_grid", "page": "04/06",
+      "title": "千亿赛道，AI 笔记工具正在重塑市场格局",
+      "cards": [
+        { "value": "$48B",  "unit": "知识管理市场规模", "label": "全球 2025 年市场总量", "note": "年均增速 19%，2030 年破 $110B" },
+        { "value": "8亿+",  "unit": "潜在用户", "label": "全球知识工作者总量", "note": "中国市场 1.5 亿，增速领先", "color": "22C55E" },
+        { "value": "31%",   "unit": "付费转化率", "label": "效率 SaaS 行业基准", "note": "AI 功能使转化率提升 2.4×", "color": "F59E0B" },
+        { "value": "¥280",  "unit": "人均 ARPU/年", "label": "国内个人订阅市场定价", "note": "企业版 ARPU 达 ¥6800+/年", "dark": true }
+      ]
+    },
+    {
+      "id": "comparison", "layout": "comparison", "page": "05/06",
+      "title": "对比主流竞品：SmartNote 的差异化壁垒",
+      "competitors": [
+        { "name": "SmartNote", "note": "★ 我们" },
+        { "name": "Notion AI", "note": "协作优先" },
+        { "name": "Obsidian",  "note": "本地存储" },
+        { "name": "印象笔记",  "note": "老牌工具" }
+      ],
+      "features": [
+        { "name": "语义搜索",     "values": [true,  true,  false, false] },
+        { "name": "自动知识图谱", "values": [true,  false, true,  false] },
+        { "name": "中文 NLP 优化","values": [true,  false, false, false] },
+        { "name": "微信一键导入", "values": [true,  false, false, true]  },
+        { "name": "离线本地模式", "values": [true,  false, true,  false] },
+        { "name": "AI 摘要质量",  "values": ["★★★★★","★★★★","★★","★★"] }
+      ]
+    },
+    {
+      "id": "business", "layout": "business", "page": "06/06",
+      "title": "三层收费模型，个人到企业全覆盖",
+      "subtitle": "Free → Pro → Team，低摩擦获客，高 LTV 沉淀",
+      "items": [
+        { "title": "免费版",       "body": "基础笔记 + 500 条 AI 摘要/月 — 获客入口，建立使用习惯",  "price": "¥0",   "price_label": "永久免费" },
+        { "title": "Pro 个人版",   "body": "无限 AI 功能 + 知识图谱 + 跨设备同步 — 主力付费转化", "price": "¥28",  "price_label": "/ 月", "color": "22C55E" },
+        { "title": "Team 企业版",  "body": "团队共享知识库 + 管理后台 + API 接入 + 私有部署选项",  "price": "¥199", "price_label": "/ 席位/月", "color": "6366F1" }
+      ]
+    }
+  ]
+}

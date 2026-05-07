@@ -1,0 +1,26 @@
+# Project files
+.idea
+.DS_Store
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.env.example
+.idea
+
+# Local MCP config (contains user-specific paths)
+mcp-config.json
+
+# MCP Registry tokens (secrets)
+.mcpregistry_*
+
+# MCP publisher
+mcp-publisher.exe
+*.mcpb

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "excel-mcp"
+version = "0.1.0"
+description = "Excel MCP Server — AI-driven Excel automation via COM + snapshot undo"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=2.8.1",
+    "openpyxl>=3.1.2",
+    "Pillow>=10.0.0",
+    "python-dotenv>=1.0.0",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.scripts]
+excel-mcp = "excel_mcp.main:run_server"
+
+[tool.hatch.build.targets.wheel]
+packages = ["excel_mcp"]

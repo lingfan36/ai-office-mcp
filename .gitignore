@@ -1,0 +1,90 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+sdist/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+.npm
+.eslintcache
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+.mcp.json
+*.key
+credentials*.json
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editor / IDE
+.vscode/
+.idea/
+.claude/
+.spec-workflow/
+*.code-workspace
+*.iml
+*.swp
+*.swo
+*~
+
+# Logs / temp
+*.log
+*.tmp
+*.temp
+*.bak
+.cache/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Project specific (ppt-master)
+projects/*
+!projects/README.md
+test_output/
+temp_files/
+/drafts/
+/notes/
+/scratch/
+.notes/
+
+# Personal notes
+TODO.md
+PERSONAL_NOTES.md

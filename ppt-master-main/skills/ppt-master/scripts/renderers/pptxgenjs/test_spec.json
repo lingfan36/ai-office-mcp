@@ -1,0 +1,109 @@
+{
+  "meta": {
+    "theme": "tech_dark",
+    "title": "AI 办公取代传统办公",
+    "author": "PPT Master"
+  },
+  "slides": [
+    {
+      "layout": "cover",
+      "id": "cover",
+      "tag": "2026 趋势报告",
+      "title": "AI 办公\n取代传统办公",
+      "subtitle": "智能协作如何重塑企业生产力",
+      "badges": ["效率提升 300%", "成本降低 60%", "7×24 小时不间断"],
+      "date": "2026 年 5 月"
+    },
+    {
+      "layout": "hero_stat",
+      "id": "hero_stat",
+      "tag": "核心数据",
+      "stat": "87%",
+      "unit": "%",
+      "label": "企业已引入 AI 工作流",
+      "sub": "较 2024 年增长 2.3 倍",
+      "page": "02",
+      "pills": [
+        { "icon": "⚡", "text": "响应速度提升 5×" },
+        { "icon": "🎯", "text": "错误率下降 78%" },
+        { "icon": "💰", "text": "人力成本节省 60%" }
+      ]
+    },
+    {
+      "layout": "solution",
+      "id": "solution",
+      "title": "AI 办公核心能力",
+      "hero": "智能自动化 + 实时协同",
+      "bullets": [
+        "文档智能生成：合同、报告、邮件一键起草，质量超越人工初稿",
+        "会议 AI 助理：实时转录、自动总结、Action Item 自动分配",
+        "数据分析自动化：从原始数据到可视化报告，全程无需人工介入",
+        "跨语言协作：实时翻译消除语言壁垒，全球团队无缝沟通"
+      ],
+      "page": "03"
+    },
+    {
+      "layout": "pipeline",
+      "id": "pipeline",
+      "title": "AI 办公落地路径",
+      "stages": [
+        {
+          "num": "01",
+          "title": "评估",
+          "bullets": ["现状诊断", "需求分析", "ROI 测算"]
+        },
+        {
+          "num": "02",
+          "title": "试点",
+          "bullets": ["选择场景", "小范围测试", "收集反馈"]
+        },
+        {
+          "num": "03",
+          "title": "推广",
+          "bullets": ["培训团队", "逐步扩展", "优化流程"]
+        },
+        {
+          "num": "04",
+          "title": "优化",
+          "bullets": ["数据监控", "持续迭代", "效益评估"]
+        }
+      ],
+      "page": "04"
+    },
+    {
+      "layout": "kpi_grid",
+      "id": "kpi_grid",
+      "title": "关键绩效指标",
+      "kpis": [
+        { "num": "300%", "label": "效率提升", "sub": "平均任务完成速度" },
+        { "num": "60%",  "label": "成本节省", "sub": "人力与运营成本" },
+        { "num": "99.9%","label": "可用率",   "sub": "系统在线时间" },
+        { "num": "2.3×", "label": "ROI",      "sub": "首年投资回报" },
+        { "num": "78%",  "label": "错误减少", "sub": "人工操作错误率" },
+        { "num": "4.8★", "label": "满意度",   "sub": "员工使用评分" }
+      ],
+      "page": "05"
+    },
+    {
+      "layout": "comparison",
+      "id": "comparison",
+      "title": "AI 办公 vs 传统办公",
+      "left":  { "label": "传统办公", "items": ["手动处理文档，耗时数小时", "会议记录靠人工，易遗漏", "数据分析需专业人员", "语言障碍制约全球协作", "工作时间受限 8 小时/天"] },
+      "right": { "label": "AI 办公",  "items": ["AI 秒级生成高质量文档", "自动转录摘要，零遗漏", "任何人都能获得深度洞察", "实时翻译，无缝跨语言", "7×24 小时持续工作支持"] },
+      "page": "06"
+    },
+    {
+      "layout": "timeline",
+      "id": "timeline",
+      "title": "AI 办公演进路线图",
+      "milestones": [
+        { "date": "2024 Q1", "title": "AI 助手普及", "body": "ChatGPT 进入企业",  "state": "done" },
+        { "date": "2025 Q1", "title": "工作流自动化", "body": "RPA + AI 深度融合", "state": "done" },
+        { "date": "2026 Q1", "title": "智能协作平台", "body": "全场景 AI 协同",    "state": "current" },
+        { "date": "2027 Q1", "title": "自主 AI 员工", "body": "AI Agent 独立完成任务", "state": "target" }
+      ],
+      "footer": "数据来源：Gartner 2026 未来办公趋势报告",
+      "page": "07"
+    }
+  ]
+}

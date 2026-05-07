@@ -1,0 +1,76 @@
+{
+  "meta": {
+    "title": "warm_startup_demo",
+    "colors": {
+      "DARK_BG":    "1C0500",
+      "DARKEST":    "0A0100",
+      "ACCENT":     "FB923C",
+      "ACCENT2":    "FCD34D",
+      "GREEN":      "4ADE80",
+      "INDIGO":     "F472B6",
+      "AMBER":      "FBBF24",
+      "T_PRIMARY":  "1C0500",
+      "BORDER":     "FED7AA",
+      "GRAD_DARK":  ["1C0500", "0A0100"],
+      "GRAD_ACCENT":["FB923C", "EF4444"],
+      "GRAD_CARD":  ["FFFFFF", "FFF7ED"]
+    }
+  },
+  "slides": [
+    {
+      "id": "cover", "layout": "cover", "page": "01/05",
+      "tag": "STARTUP · GROWTH · 2026",
+      "title": "暖色调风格",
+      "subtitle": "橙色系 · 活力感 · 消费品/创业公司风",
+      "subtitle2": "渐变背景 · Pexels 配图 · 阴影卡片",
+      "badge": "Style Demo · Warm",
+      "image_bg": "fire orange sunset dramatic warm dark"
+    },
+    {
+      "id": "stat", "layout": "hero_stat", "page": "02/05",
+      "title": "用户增长超出预期",
+      "hero_number": "312", "hero_unit": "%",
+      "hero_label": "产品上线 6 个月，月活用户同比增速（内部数据）",
+      "columns": [
+        { "title": "口碑裂变", "body": "NPS 均分 72\n用户自发推荐占新增 58%" },
+        { "title": "留存强劲", "body": "D30 留存率 61%\n远超行业均值 23%" },
+        { "title": "变现加速", "body": "付费转化 29%\n人均 ARPU ¥348/年" }
+      ]
+    },
+    {
+      "id": "market", "layout": "kpi_grid", "page": "03/05",
+      "title": "市场机会四维透视",
+      "cards": [
+        { "value": "¥680亿", "unit": "目标市场规模", "label": "国内消费 SaaS 2025 年", "note": "2030 年预计突破 ¥1500 亿" },
+        { "value": "2.3亿",  "unit": "潜在用户",     "label": "Z 世代移动端重度用户", "note": "年均消费意愿同比 +18%", "color": "4ADE80" },
+        { "value": "47%",    "unit": "未被覆盖",      "label": "现有产品覆盖率不足",   "note": "蓝海空间显著", "color": "FBBF24" },
+        { "value": "¥62",    "unit": "获客成本",      "label": "社交裂变模型 CAC",     "note": "远低于行业均值 ¥240", "dark": true }
+      ]
+    },
+    {
+      "id": "biz", "layout": "business", "page": "04/05",
+      "title": "三级收费，低摩擦裂变",
+      "subtitle": "免费用量驱动自然增长，Pro 沉淀高价值用户，企业版锁定 LTV",
+      "items": [
+        { "title": "免费版", "body": "核心功能永久免费 · 获客入口 · 建立使用习惯",         "price": "¥0",   "price_label": "永久免费" },
+        { "title": "Pro 版", "body": "无限功能 · 云同步 · AI 增强 · 主力付费转化",        "price": "¥29",  "price_label": "/ 月",     "color": "4ADE80" },
+        { "title": "团队版", "body": "协作空间 · 管理后台 · API · 专属客户成功",           "price": "¥199", "price_label": "/ 席位/月", "color": "F472B6" }
+      ]
+    },
+    {
+      "id": "raise", "layout": "fundraising", "page": "05/05",
+      "tag": "FUNDRAISING · PRE-A",
+      "title": "寻求 Pre-A 融资",
+      "amount": "¥2000", "amount_unit": "万",
+      "round_label": "Pre-A 轮",
+      "target_time": "目标：2027 Q1 完成 A 轮",
+      "target_arr":  "A 轮后 ARR 突破 ¥1800 万",
+      "contact": "founder@warmstartup.com",
+      "breakdowns": [
+        { "pct": "45%", "title": "产品研发", "subtitle": "AI 算法 / 移动端 / 体验优化", "body": "加速核心壁垒建设" },
+        { "pct": "35%", "title": "增长营销", "subtitle": "内容 / KOL / 社交裂变",       "body": "规模化用户获取" },
+        { "pct": "20%", "title": "团队扩张", "subtitle": "产品 / 运营 / 客户成功",       "body": "支撑高速增长", "color": "4ADE80" }
+      ]
+    }
+  ]
+}

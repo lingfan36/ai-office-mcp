@@ -1,0 +1,76 @@
+{
+  "meta": {
+    "title": "minimal_corporate_demo",
+    "colors": {
+      "DARK_BG":    "0F172A",
+      "DARKEST":    "020617",
+      "ACCENT":     "6366F1",
+      "ACCENT2":    "818CF8",
+      "GREEN":      "10B981",
+      "INDIGO":     "8B5CF6",
+      "AMBER":      "F59E0B",
+      "T_PRIMARY":  "0F172A",
+      "BORDER":     "C7D2FE",
+      "GRAD_DARK":  ["0F172A", "1E293B"],
+      "GRAD_ACCENT":["6366F1", "8B5CF6"],
+      "GRAD_CARD":  ["FFFFFF", "F8FAFC"]
+    }
+  },
+  "slides": [
+    {
+      "id": "cover", "layout": "cover", "page": "01/05",
+      "tag": "ENTERPRISE · SAAS · 2026",
+      "title": "极简风格",
+      "subtitle": "深蓝紫系 · 科技感 · 企业SaaS风",
+      "subtitle2": "简洁布局 · 渐变背景 · 卡片阴影",
+      "badge": "Style Demo · Minimal",
+      "image_bg": "dark blue tech office city night minimal"
+    },
+    {
+      "id": "stat", "layout": "hero_stat", "page": "02/05",
+      "title": "平台运营效率全面提升",
+      "hero_number": "4.8×", "hero_unit": "",
+      "hero_label": "企业部署后平均工作流处理速度提升倍数（基于 120 家客户数据）",
+      "columns": [
+        { "title": "自动化率", "body": "重复操作自动化 91%\n人工介入减少 78%" },
+        { "title": "错误率", "body": "数据录入错误 -94%\nSLA 达标率 99.97%" },
+        { "title": "ROI", "body": "平均 6.2 个月回本\n3 年 ROI 达 340%" }
+      ]
+    },
+    {
+      "id": "market", "layout": "kpi_grid", "page": "03/05",
+      "title": "市场规模与竞争格局",
+      "cards": [
+        { "value": "$420亿", "unit": "全球市场",   "label": "企业工作流自动化 2025", "note": "CAGR 23.4%，增长加速" },
+        { "value": "68%",    "unit": "替换意愿",   "label": "现有用户愿意换更好产品", "note": "竞品满意度普遍偏低", "color": "10B981" },
+        { "value": "3.2万",  "unit": "目标企业",   "label": "国内 500~5000 人规模",  "note": "数字化转型窗口期",  "color": "F59E0B" },
+        { "value": "¥89",    "unit": "获客成本",   "label": "BD + 内容营销混合模型", "note": "竞品均值 ¥520",      "dark": true }
+      ]
+    },
+    {
+      "id": "biz", "layout": "business", "page": "04/05",
+      "title": "分层定价，按需升级",
+      "subtitle": "标准版快速入场，专业版深度集成，旗舰版全托管服务",
+      "items": [
+        { "title": "标准版", "body": "5 个工作流 · 基础 API · 标准支持 · 快速上手",     "price": "¥599",  "price_label": "/ 月" },
+        { "title": "专业版", "body": "无限工作流 · 高级分析 · 优先支持 · SSO 集成",     "price": "¥1999", "price_label": "/ 月", "color": "10B981" },
+        { "title": "旗舰版", "body": "私有部署 · 定制开发 · 专属 CSM · SLA 99.99%",   "price": "定制",  "price_label": "报价",  "color": "8B5CF6" }
+      ]
+    },
+    {
+      "id": "raise", "layout": "fundraising", "page": "05/05",
+      "tag": "FUNDRAISING · SERIES-A",
+      "title": "Series A 融资计划",
+      "amount": "¥8000", "amount_unit": "万",
+      "round_label": "A 轮",
+      "target_time": "目标：2027 Q2 完成 B 轮",
+      "target_arr":  "B 轮时 ARR 超过 ¥6000 万",
+      "contact": "cfo@minimalcorp.com",
+      "breakdowns": [
+        { "pct": "40%", "title": "产品研发", "subtitle": "AI 引擎 / 集成生态 / 安全合规", "body": "构建技术护城河" },
+        { "pct": "38%", "title": "销售拓展", "subtitle": "企业 BD / 渠道合作 / 海外试点",  "body": "加速规模化变现" },
+        { "pct": "22%", "title": "运营支撑", "subtitle": "客户成功 / 品牌 / 基础设施",     "body": "保障交付质量", "color": "10B981" }
+      ]
+    }
+  ]
+}

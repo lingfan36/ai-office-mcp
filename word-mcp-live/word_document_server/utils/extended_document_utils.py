@@ -1,0 +1,232 @@
+"""
+Extended document utilities for Word Document Server.
+"""
+from typing import Dict, List, Any, Tuple
+from docx import Document
+
+from word_document_server.utils.document_utils import get_effective_text
+
+
+def get_paragraph_text(doc_path: str, paragraph_index: int) -> Dict[str, Any]:
+    """
+    Get text from a specific paragraph in a Word document.
+    
+    Args:
+        doc_path: Path to the Word document
+        paragraph_index: Index of the paragraph to extract (0-based)
+    
+    Returns:
+        Dictionary with paragraph text and metadata
+    """
+    import os
+    if not os.path.exists(doc_path):
+        return {"error": f"Document {doc_path} does not exist"}
+    
+    try:
+        doc = Document(doc_path)
+        
+        # Check if paragraph index is valid
+        if paragraph_index < 0 or paragraph_index >= len(doc.paragraphs):
+            return {"error": f"Invalid paragraph index: {paragraph_index}. Document has {len(doc.paragraphs)} paragraphs."}
+        
+        paragraph = doc.paragraphs[paragraph_index]
+        
+        return {
+            "index": paragraph_index,
+            "text": get_effective_text(paragraph),
+            "style": paragraph.style.name if paragraph.style else "Normal",
+            "is_heading": paragraph.style.name.startswith("Heading") if paragraph.style else False
+        }
+    except Exception as e:
+        return {"error": f"Failed to get paragraph text: {str(e)}"}
+
+
+def find_text(doc_path: str, text_to_find: str, match_case: bool = True, whole_word: bool = False) -> Dict[str, Any]:
+    """
+    Find all occurrences of specific text in a Word document.
+    
+    Args:
+        doc_path: Path to the Word document
+        text_to_find: Text to search for
+        match_case: Whether to perform case-sensitive search
+        whole_word: Whether to match whole words only
+    
+    Returns:
+        Dictionary with search results
+    """
+    import os
+    if not os.path.exists(doc_path):
+        return {"error": f"Document {doc_path} does not exist"}
+    
+    if not text_to_find:
+        return {"error": "Search text cannot be empty"}
+    
+    try:
+        doc = Document(doc_path)
+        results = {
+            "query": text_to_find,
+            "match_case": match_case,
+            "whole_word": whole_word,
+            "occurrences": [],
+            "total_count": 0
+        }
+        
+        # Search in paragraphs
+        for i, para in enumerate(doc.paragraphs):
+            # Prepare text for comparison — use get_effective_text for tracked-change support
+            effective = get_effective_text(para)
+            para_text = effective
+            search_text = text_to_find
+
+            if not match_case:
+                para_text = para_text.lower()
+                search_text = search_text.lower()
+
+            # Find all occurrences (simple implementation)
+            start_pos = 0
+            while True:
+                if whole_word:
+                    # For whole word search, we need to check word boundaries
+                    words = para_text.split()
+                    found = False
+                    for word_idx, word in enumerate(words):
+                        if (word == search_text or
+                            (not match_case and word.lower() == search_text.lower())):
+                            results["occurrences"].append({
+                                "paragraph_index": i,
+                                "position": word_idx,
+                                "context": effective[:100] + ("..." if len(effective) > 100 else "")
+                            })
+                            results["total_count"] += 1
+                            found = True
+
+                    # Break after checking all words
+                    break
+                else:
+                    # For substring search
+                    pos = para_text.find(search_text, start_pos)
+                    if pos == -1:
+                        break
+
+                    results["occurrences"].append({
+                        "paragraph_index": i,
+                        "position": pos,
+                        "context": effective[:100] + ("..." if len(effective) > 100 else "")
+                    })
+                    results["total_count"] += 1
+                    start_pos = pos + len(search_text)
+        
+        # Search in tables
+        for table_idx, table in enumerate(doc.tables):
+            for row_idx, row in enumerate(table.rows):
+                for col_idx, cell in enumerate(row.cells):
+                    for para_idx, para in enumerate(cell.paragraphs):
+                        # Prepare text for comparison
+                        effective = get_effective_text(para)
+                        para_text = effective
+                        search_text = text_to_find
+
+                        if not match_case:
+                            para_text = para_text.lower()
+                            search_text = search_text.lower()
+
+                        # Find all occurrences (simple implementation)
+                        start_pos = 0
+                        while True:
+                            if whole_word:
+                                # For whole word search, check word boundaries
+                                words = para_text.split()
+                                found = False
+                                for word_idx, word in enumerate(words):
+                                    if (word == search_text or
+                                        (not match_case and word.lower() == search_text.lower())):
+                                        results["occurrences"].append({
+                                            "location": f"Table {table_idx}, Row {row_idx}, Column {col_idx}",
+                                            "position": word_idx,
+                                            "context": effective[:100] + ("..." if len(effective) > 100 else "")
+                                        })
+                                        results["total_count"] += 1
+                                        found = True
+
+                                # Break after checking all words
+                                break
+                            else:
+                                # For substring search
+                                pos = para_text.find(search_text, start_pos)
+                                if pos == -1:
+                                    break
+
+                                results["occurrences"].append({
+                                    "location": f"Table {table_idx}, Row {row_idx}, Column {col_idx}",
+                                    "position": pos,
+                                    "context": effective[:100] + ("..." if len(effective) > 100 else "")
+                                })
+                                results["total_count"] += 1
+                                start_pos = pos + len(search_text)
+        
+        return results
+    except Exception as e:
+        return {"error": f"Failed to search for text: {str(e)}"}
+
+
+def get_highlighted_text(doc_path: str, color: str = None) -> Dict[str, Any]:
+    """
+    Extract all highlighted text from a Word document,
+    including text inside table cells.
+
+    Args:
+        doc_path: Path to the Word document
+        color: Optional highlight color filter (e.g. "yellow", "green", "cyan").
+               If None, returns all highlighted text regardless of color.
+
+    Returns:
+        Dictionary with highlighted sections grouped by location
+    """
+    import os
+    from docx.oxml.ns import qn
+
+    if not os.path.exists(doc_path):
+        return {"error": f"Document {doc_path} does not exist"}
+
+    try:
+        doc = Document(doc_path)
+        results = {
+            "filter_color": color,
+            "highlights": [],
+            "total_runs": 0,
+            "summary": {}
+        }
+
+        def _check_paragraphs(paragraphs, location_prefix):
+            for p_idx, para in enumerate(paragraphs):
+                for run in para.runs:
+                    hl = run._element.find(qn('w:rPr'))
+                    if hl is not None:
+                        hl_elem = hl.find(qn('w:highlight'))
+                        if hl_elem is not None:
+                            hl_color = hl_elem.get(qn('w:val'))
+                            if color and hl_color != color:
+                                continue
+                            results["highlights"].append({
+                                "location": f"{location_prefix}, Paragraph {p_idx}",
+                                "color": hl_color,
+                                "text": run.text
+                            })
+                            results["total_runs"] += 1
+                            results["summary"][hl_color] = results["summary"].get(hl_color, 0) + 1
+
+        # Top-level paragraphs
+        _check_paragraphs(doc.paragraphs, "Body")
+
+        # Table cells
+        for t_idx, table in enumerate(doc.tables):
+            for r_idx, row in enumerate(table.rows):
+                for c_idx, cell in enumerate(row.cells):
+                    _check_paragraphs(
+                        cell.paragraphs,
+                        f"Table {t_idx}, Row {r_idx}, Col {c_idx}"
+                    )
+
+        return results
+    except Exception as e:
+        return {"error": f"Failed to extract highlights: {str(e)}"}

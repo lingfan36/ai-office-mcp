@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "word-mcp-live"
+version = "1.6.2"
+description = "MCP server for Microsoft Word — live editing on Windows (COM) and macOS (JXA), plus cross-platform python-docx tools"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "GongRzhe", email = "gongrzhe@gmail.com"},
+    {name = "Yüce Karapazar"}
+]
+keywords = ["mcp", "word", "docx", "microsoft-word", "document", "com-automation", "python-docx", "ai", "llm", "claude"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "python-docx>=1.1.2",
+    "fastmcp>=2.8.1",
+    "msoffcrypto-tool>=5.4.2",
+    "docx2pdf>=0.1.8",
+    "pytest>=8.4.2",
+    "pywin32>=306; sys_platform == 'win32'",
+    "Pillow>=10.0.0; sys_platform == 'win32'",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/ykarapazar/word-mcp-live"
+"Bug Tracker" = "https://github.com/ykarapazar/word-mcp-live/issues"
+"Changelog" = "https://github.com/ykarapazar/word-mcp-live/blob/main/CHANGELOG.md"
+"Documentation" = "https://github.com/ykarapazar/word-mcp-live#readme"
+
+[tool.hatch.build.targets.wheel]
+only-include = [
+    "word_document_server",
+    "office_word_mcp_server",
+]
+sources = ["."]
+
+[project.scripts]
+word_mcp_server = "word_document_server.main:run_server"

@@ -1,0 +1,141 @@
+{
+  "meta": { "title": "PPT Master Investor Pitch" },
+  "slides": [
+    {
+      "id": "cover", "layout": "cover", "page": "01/11",
+      "tag": "AI · PPT · 投资人路演",
+      "title": "PPT Master",
+      "subtitle": "你给我一份文档，我还你一份专业的 PPTX",
+      "subtitle2": "AI 驱动 · 原生可编辑 · 全格式支持",
+      "badge": "Series A Pitch Deck · 2026"
+    },
+    {
+      "id": "pain", "layout": "hero_stat", "page": "02/11",
+      "title": "每份 PPT 背后，是一场效率消耗战",
+      "hero_number": "6.5", "hero_unit": "小时",
+      "hero_label": "麦肯锡研究：平均制作一份专业演示文稿的时间",
+      "columns": [
+        { "title": "时间门槛", "body": "反复打磨排版\n无法专注内容本身" },
+        { "title": "技能门槛", "body": "设计能力稀缺\n业余输出拉低专业度" },
+        { "title": "工具门槛", "body": "PowerPoint 操作繁琐\nAI 工具割裂不整合" }
+      ]
+    },
+    {
+      "id": "solution", "layout": "solution", "page": "03/11",
+      "tag": "THE ANSWER",
+      "hero": "输入文档\n输出 PPTX",
+      "bullets": [
+        { "title": "多格式源文档", "body": "PDF · Word · URL · Markdown" },
+        { "title": "AI 多角色协作", "body": "策略师 → 执行器 → 质检" },
+        { "title": "原生 DrawingML", "body": "每个元素可在 PowerPoint 直接编辑" }
+      ],
+      "cards": [
+        { "icon_char": "🤖", "title": "AI 全流程接管", "body": "不是模板，不是截图——是从文档直接输出原生可编辑的 PPTX 文件" },
+        { "icon_char": "🎨", "title": "设计质量达到 ★★★★★", "body": "多角色 AI 协作保证视觉一致性，11600 个矢量图标库支撑" },
+        { "icon_char": "🔒", "title": "支持离线私有化部署", "body": "金融、政府客户数据不出内网，行业唯一方案" }
+      ]
+    },
+    {
+      "id": "pipeline", "layout": "pipeline", "page": "04/11",
+      "title": "五阶段 AI 生成流水线，每步有质量关卡",
+      "stages": [
+        { "title": "源文档解析", "bullets": ["PDF/Word/URL", "结构化提取", "图像识别"] },
+        { "title": "策略师规划", "bullets": ["内容架构", "页面节奏", "视觉风格"] },
+        { "title": "图像生成", "bullets": ["AI 配图", "矢量图标"], "optional": true },
+        { "title": "执行器逐页", "bullets": ["SVG 生成", "坐标精确", "质检校验"] },
+        { "title": "PPTX 导出", "bullets": ["DrawingML", "原生可编辑", "备注导出"] }
+      ]
+    },
+    {
+      "id": "capability", "layout": "hub_spoke", "page": "05/11",
+      "title": "六大能力模块，形成技术护城河",
+      "hub": { "title": "AI\n引擎" },
+      "spokes": [
+        { "title": "全格式源文档", "body": "PDF · Word · URL · Markdown" },
+        { "title": "策略师规划", "body": "内容结构 · 页面节奏 · 风格决策" },
+        { "title": "11600 图标库", "body": "矢量图标 · 实时渲染" },
+        { "title": "70 图表模板", "body": "雷达图 · 时间轴 · KPI 卡片" },
+        { "title": "DrawingML 输出", "body": "SVG → 原生 PowerPoint 形状" },
+        { "title": "音频旁白导出", "body": "TTS 生成 · 逐页录音" }
+      ]
+    },
+    {
+      "id": "market", "layout": "kpi_grid", "page": "06/11",
+      "title": "150 亿美元市场，AI 渗透率不足 5%",
+      "cards": [
+        { "value": "$15B", "unit": "市场总规模", "label": "全球商务演示文稿 2025 年", "note": "年均增速 23%，持续扩张" },
+        { "value": "3500万", "unit": "份/天", "label": "全球每日新建 PPT 数量", "note": "中国市场占比超 30%", "color": "22C55E" },
+        { "value": "23%", "unit": "年均增长", "label": "AI 工具驱动市场提速", "note": "2025-2030 复合增长率", "color": "F59E0B" },
+        { "value": "<5%", "unit": "AI 渗透率", "label": "当前 AI 工具市场渗透", "note": "95% 市场尚未被 AI 触达", "dark": true }
+      ]
+    },
+    {
+      "id": "advantage", "layout": "radar", "page": "07/11",
+      "title": "六维评估：PPT Master 全面领先",
+      "legend_us": "PPT Master", "legend_avg": "行业均值",
+      "dimensions": [
+        { "name": "视觉设计质量",   "us": 9, "avg": 5 },
+        { "name": "原生可编辑性",   "us": 8, "avg": 4 },
+        { "name": "源格式兼容性",   "us": 9, "avg": 6 },
+        { "name": "图表丰富度",     "us": 8, "avg": 7 },
+        { "name": "部署独立性",     "us": 9, "avg": 5 },
+        { "name": "中文支持",       "us": 10,"avg": 3 }
+      ]
+    },
+    {
+      "id": "comparison", "layout": "comparison", "page": "08/11",
+      "title": "竞品对比：我们是唯一全能方案",
+      "competitors": [
+        { "name": "PPT Master", "note": "★ 我们" },
+        { "name": "Gamma", "note": "Web 输出" },
+        { "name": "Beautiful.ai", "note": "模板驱动" },
+        { "name": "Tome", "note": "AI 叙事" }
+      ],
+      "features": [
+        { "name": "输出原生 PPTX",   "values": [true,  false, true,  false] },
+        { "name": "视觉设计质量",    "values": ["★★★★★", "★★★★", "★★★★", "★★★"] },
+        { "name": "AI 多角色协作",   "values": [true,  false, false, false] },
+        { "name": "多格式源文档",    "values": [true,  false, false, false] },
+        { "name": "离线/私有部署",   "values": [true,  false, false, false] },
+        { "name": "中文支持",        "values": ["完整", "有限", "无",  "有限"] }
+      ]
+    },
+    {
+      "id": "business", "layout": "business", "page": "09/11",
+      "title": "三条收入曲线，企业级 SaaS 路径清晰",
+      "subtitle": "个人 → 团队 → 企业，客户层级完整，收入来源稳定可预期",
+      "items": [
+        { "title": "个人订阅", "body": "创作者 / 自由职业者 / 学生 — 核心获客漏斗，引流企业版", "price": "$19", "price_label": "/ 月 · 个人" },
+        { "title": "企业席位授权", "body": "咨询公司 / 投行 / 大型企业 — 高 LTV 主力收入，规模化扩张关键", "price": "$99", "price_label": "/ 席位/月 · 企业", "color": "22C55E" },
+        { "title": "API + 私有化部署", "body": "金融机构 / 政府客户 — 数据安全要求严格，高毛利，战略合作优先", "price": "定制", "price_label": "高毛利合约", "color": "6366F1" }
+      ]
+    },
+    {
+      "id": "timeline", "layout": "timeline", "page": "10/11",
+      "title": "18 个月达成规模化商业闭环",
+      "footer": "路线图以 2026 Q2 为起点，目标 2027 Q2 完成 A 轮，实现规模化商业闭环",
+      "milestones": [
+        { "date": "2026 Q2", "title": "产品公测",     "body": "首批付费用户\n1000+",       "state": "current" },
+        { "date": "2026 Q3", "title": "企业版上线",   "body": "签约首批 5 家\n咨询公司",   "state": "planned" },
+        { "date": "2026 Q4", "title": "ARR 突破 ¥500万","body": "启动 API\n商业化",        "state": "planned" },
+        { "date": "2027 Q1", "title": "出海版本发布", "body": "进入\n东南亚市场",           "state": "planned" },
+        { "date": "2027 Q2", "title": "ARR 突破 ¥2000万","body": "完成 A 轮融资",          "state": "target"  }
+      ]
+    },
+    {
+      "id": "fundraising", "layout": "fundraising", "page": "11/11",
+      "tag": "FUNDRAISING · PRE-A",
+      "title": "寻求 Pre-A 轮融资",
+      "amount": "¥3000", "amount_unit": "万",
+      "round_label": "Pre-A 轮",
+      "target_time": "目标完成时间：2027 Q2",
+      "target_arr":  "完成 A 轮后 ARR 突破 ¥2000 万",
+      "contact": "ConnDoylerbm@lovecat.com",
+      "breakdowns": [
+        { "pct": "40%", "title": "产品研发", "subtitle": "模型微调 / 更多格式 / 移动端", "body": "持续扩大核心技术护城河" },
+        { "pct": "35%", "title": "销售与市场", "subtitle": "企业客户拓展 / 品牌建设", "body": "加速企业级市场渗透" },
+        { "pct": "25%", "title": "团队扩张", "subtitle": "AI 工程师 / 销售 / 客户成功", "body": "构建支撑规模增长的核心团队", "color": "22C55E" }
+      ]
+    }
+  ]
+}

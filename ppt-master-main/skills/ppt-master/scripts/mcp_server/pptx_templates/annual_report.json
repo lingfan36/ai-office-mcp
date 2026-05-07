@@ -1,0 +1,41 @@
+{
+  "name": "annual_report",
+  "description": "年度汇报通用模板",
+  "created": "2026-05-06",
+  "deck": {
+    "meta": {
+      "theme": "corporate"
+    },
+    "slides": [
+      {
+        "layout": "cover",
+        "title": "{{company}} 年度汇报",
+        "subtitle": "{{year}}年度营收增长报告",
+        "badge": "CONFIDENTIAL",
+        "page": "01"
+      },
+      {
+        "layout": "hero_stat",
+        "title": "核心指标",
+        "hero_number": "{{revenue}}",
+        "hero_unit": "{{unit}}",
+        "hero_label": "全年营收",
+        "columns": [
+          {
+            "title": "同比增长",
+            "body": "{{growth}}"
+          },
+          {
+            "title": "新增客户",
+            "body": "{{new_clients}}"
+          },
+          {
+            "title": "市场份额",
+            "body": "{{market_share}}"
+          }
+        ],
+        "page": "02"
+      }
+    ]
+  }
+}
