@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import time
 import unicodedata
 import uuid
@@ -14,13 +15,77 @@ from pathlib import Path
 SNAPSHOT_DIR = Path(os.environ.get("WORD_SNAPSHOT_DIR", Path.home() / ".word_mcp" / "snapshots"))
 MAX_SNAPSHOTS = int(os.environ.get("WORD_MAX_SNAPSHOTS", "20"))
 
+# Serialize COM access across concurrent tool calls and (optionally) detect
+# frozen Word. Cross-tool concurrency manifests as "transient COM marshalling
+# failures" (see CHANGELOG v1.6.0). Tuned via env so deployments can adapt.
+#
+# Liveness probe is OFF by default since 1.7.1 — the cross-thread probe
+# without message pumping deadlocks against Word's STA marshalling and was
+# causing every write to time out at _COM_LIVENESS_TIMEOUT. When enabled,
+# the probe uses the pumped-message implementation in _probe_with_timeout.
+_COM_LOCK_TIMEOUT = float(os.environ.get("WORD_COM_LOCK_TIMEOUT", "30"))
+_COM_LIVENESS_TIMEOUT = float(os.environ.get("WORD_COM_LIVENESS_TIMEOUT", "3"))
+_COM_LIVENESS_PROBE = os.environ.get("WORD_COM_LIVENESS_PROBE", "0").lower() not in (
+    "0", "off", "false", "no", "",
+)
+_app_lock = threading.RLock()
+
 _app = None  # singleton Word.Application COM object
 
 
 def reset_word_app():
     """Clear the cached COM app reference (forces reconnect on next call)."""
     global _app
-    _app = None
+    with _app_lock:
+        _app = None
+
+
+def _probe_with_timeout(callable_, timeout: float) -> bool:
+    """Run *callable_* on a daemon thread; return True if it finishes in time.
+
+    The caller's COM proxy is bound to the calling thread's STA. A
+    cross-thread call from the worker would deadlock unless the main
+    thread pumps Win32 messages while waiting (the originating apartment
+    has to service the RPC). So we don't just ``Event.wait`` — we pump
+    ``pythoncom.PumpWaitingMessages()`` in 50 ms slices until done or
+    timeout. Without this, every probe hangs the full timeout against
+    Word's STA, and Writers (which sit behind ``_com_guard``) appear to
+    time out for no reason. Reads bypass the guard and were unaffected.
+
+    Falls back to plain Event.wait if pythoncom isn't importable (non-Win).
+    """
+    done = threading.Event()
+    box = {"err": None}
+
+    def worker():
+        try:
+            callable_()
+        except Exception as exc:
+            box["err"] = exc
+        finally:
+            done.set()
+
+    t = threading.Thread(target=worker, daemon=True, name="word-com-probe")
+    t.start()
+
+    try:
+        import pythoncom  # type: ignore
+    except ImportError:
+        if not done.wait(timeout):
+            return False
+        return box["err"] is None
+
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        if done.wait(min(0.05, remaining)):
+            return box["err"] is None
+        try:
+            pythoncom.PumpWaitingMessages()
+        except Exception:
+            pass
 
 
 def _docs_accessible(app) -> bool:
@@ -52,58 +117,62 @@ def get_word_app(visible: bool = True, auto_launch: bool = True):
 
     global _app
 
-    # Check cached singleton
-    try:
-        if _app is not None:
-            _ = _app.Version  # liveness probe
-            if _docs_accessible(_app):
-                return _app
+    # Serialize app discovery/launch so two concurrent callers don't both
+    # Dispatch a new Word instance. RLock is reentrant so this is safe when
+    # called from inside an already-guarded section (undo_record/com_session).
+    with _app_lock:
+        # Check cached singleton
+        try:
+            if _app is not None:
+                _ = _app.Version  # liveness probe
+                if _docs_accessible(_app):
+                    return _app
+                _app = None
+        except Exception:
             _app = None
-    except Exception:
-        _app = None
 
-    # Try a running instance via GetActiveObject
-    try:
-        candidate = win32com.client.GetActiveObject("Word.Application")
-        if _docs_accessible(candidate):
+        # Try a running instance via GetActiveObject
+        try:
+            candidate = win32com.client.GetActiveObject("Word.Application")
+            if _docs_accessible(candidate):
+                _app = candidate
+                return _app
+            # Scan ROT for an instance with open documents
+            found = _find_word_with_docs()
+            if found is not None:
+                _app = found
+                return _app
+            # Use the empty instance (caller can open a file)
             _app = candidate
             return _app
-        # Scan ROT for an instance with open documents
+        except pywintypes.com_error:
+            pass
+        except Exception:
+            pass
+
+        # Try ROT scan
         found = _find_word_with_docs()
         if found is not None:
             _app = found
             return _app
-        # Use the empty instance (caller can open a file)
-        _app = candidate
+
+        # Auto-launch Word if allowed
+        if not auto_launch:
+            raise RuntimeError(
+                "Microsoft Word is not running. Open Word first or set auto_launch=True."
+            )
+
+        _app = win32com.client.Dispatch("Word.Application")
+        try:
+            _app.Visible = visible
+        except Exception:
+            pass
+        # Wait up to 6 s for Word to finish initialising
+        for _ in range(12):
+            if _docs_accessible(_app):
+                return _app
+            time.sleep(0.5)
         return _app
-    except pywintypes.com_error:
-        pass
-    except Exception:
-        pass
-
-    # Try ROT scan
-    found = _find_word_with_docs()
-    if found is not None:
-        _app = found
-        return _app
-
-    # Auto-launch Word if allowed
-    if not auto_launch:
-        raise RuntimeError(
-            "Microsoft Word is not running. Open Word first or set auto_launch=True."
-        )
-
-    _app = win32com.client.Dispatch("Word.Application")
-    try:
-        _app.Visible = visible
-    except Exception:
-        pass
-    # Wait up to 6 s for Word to finish initialising
-    for _ in range(12):
-        if _docs_accessible(_app):
-            return _app
-        time.sleep(0.5)
-    return _app
 
 
 def _find_word_with_docs():
@@ -199,27 +268,113 @@ def find_document(app, filename: str = None):
 
 
 @contextmanager
-def undo_record(app, name: str):
-    """Wrap COM mutations in a single Word UndoRecord (one Ctrl+Z entry)."""
-    rec = None
+def _com_guard(probe_app, op_name: str):
+    """Acquire the COM lock and verify Word is responsive.
+
+    Internal helper shared by ``undo_record`` and ``com_session``. Raises
+    with a clear message instead of blocking indefinitely when:
+      * another tool is mid-call past ``_COM_LOCK_TIMEOUT`` seconds, or
+      * Word is unresponsive (modal dialog, hang) past ``_COM_LIVENESS_TIMEOUT``.
+    """
+    global _app
+
+    acquired = _app_lock.acquire(timeout=_COM_LOCK_TIMEOUT)
+    if not acquired:
+        raise RuntimeError(
+            f"Another Word operation is still running after {_COM_LOCK_TIMEOUT}s "
+            f"(while attempting: {op_name}). Word may be showing a modal dialog "
+            "(protected view, macro warning, save prompt). Switch to Word and "
+            "dismiss it, or set WORD_COM_LOCK_TIMEOUT higher."
+        )
     try:
-        rec = app.UndoRecord
-        if rec.IsRecordingCustomRecord:
-            try:
-                rec.EndCustomRecord()
-            except Exception:
-                pass
-        rec.StartCustomRecord(name[:64])
-    except Exception:
-        rec = None
-    try:
+        if probe_app is not None and _COM_LIVENESS_PROBE:
+            if not _probe_with_timeout(lambda: probe_app.Version, _COM_LIVENESS_TIMEOUT):
+                _app = None
+                raise RuntimeError(
+                    f"Word is unresponsive (liveness probe timed out after "
+                    f"{_COM_LIVENESS_TIMEOUT}s while attempting: {op_name}). "
+                    "Likely a modal dialog is open in Word. Cached COM reference "
+                    "was reset; retry after dismissing the dialog."
+                )
         yield
     finally:
-        if rec is not None:
-            try:
-                rec.EndCustomRecord()
-            except Exception:
-                pass
+        try:
+            _app_lock.release()
+        except RuntimeError:
+            pass
+
+
+@contextmanager
+def com_session(op_name: str = "MCP read"):
+    """Serialize a read-only COM operation. No Word UndoRecord wrap.
+
+    Use for tools that don't mutate the document but still touch the COM
+    object — protects against the same races as ``undo_record`` without
+    adding an empty entry to Word's undo stack.
+
+    Caller pattern::
+
+        with com_session("get text"):
+            app = get_word_app()
+            doc = find_document(app, filename)
+            ...
+    """
+    # Probe lazily: only after we have an app. We can't probe before
+    # get_word_app because the app may not exist yet.
+    if not _app_lock.acquire(timeout=_COM_LOCK_TIMEOUT):
+        raise RuntimeError(
+            f"Another Word operation is still running after {_COM_LOCK_TIMEOUT}s "
+            f"(while attempting: {op_name})."
+        )
+    try:
+        if _app is not None and _COM_LIVENESS_PROBE:
+            if not _probe_with_timeout(lambda: _app.Version, _COM_LIVENESS_TIMEOUT):
+                _reset_locked()
+                raise RuntimeError(
+                    f"Word is unresponsive (liveness probe timed out while "
+                    f"attempting: {op_name}). Cached COM reference reset."
+                )
+        yield
+    finally:
+        try:
+            _app_lock.release()
+        except RuntimeError:
+            pass
+
+
+def _reset_locked():
+    """Reset _app while the lock is already held by the current thread."""
+    global _app
+    _app = None
+
+
+@contextmanager
+def undo_record(app, name: str):
+    """Wrap COM mutations in a single Word UndoRecord (one Ctrl+Z entry).
+
+    Also serializes concurrent COM access and probes Word liveness so a
+    frozen Word process raises instead of hanging the MCP server.
+    """
+    with _com_guard(app, name):
+        rec = None
+        try:
+            rec = app.UndoRecord
+            if rec.IsRecordingCustomRecord:
+                try:
+                    rec.EndCustomRecord()
+                except Exception:
+                    pass
+            rec.StartCustomRecord(name[:64])
+        except Exception:
+            rec = None
+        try:
+            yield
+        finally:
+            if rec is not None:
+                try:
+                    rec.EndCustomRecord()
+                except Exception:
+                    pass
 
 
 # ---------------------------------------------------------------------------

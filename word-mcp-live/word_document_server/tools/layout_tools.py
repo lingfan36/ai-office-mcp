@@ -25,29 +25,68 @@ _ALIGN_MAP = {
 }
 
 
+def _pick_length(cm: float = None, inches: float = None):
+    """Return a python-docx Length (Cm or Inches), preferring cm if both given."""
+    if cm is not None:
+        if cm < 0 or cm > 142:  # ~56 in ceiling
+            raise ValueError(f"value {cm}cm out of plausible range")
+        return Cm(cm)
+    if inches is not None:
+        if inches < 0 or inches > 56:
+            raise ValueError(f"value {inches}in out of plausible range")
+        return Inches(inches)
+    return None
+
+
 async def set_page_layout(
     filename: str,
     section_index: int = 0,
     orientation: str = None,
+    # Page size
     page_width_inches: float = None,
     page_height_inches: float = None,
+    page_width_cm: float = None,
+    page_height_cm: float = None,
+    # Margins
     margin_top_inches: float = None,
     margin_bottom_inches: float = None,
     margin_left_inches: float = None,
     margin_right_inches: float = None,
+    margin_top_cm: float = None,
+    margin_bottom_cm: float = None,
+    margin_left_cm: float = None,
+    margin_right_cm: float = None,
+    # Binding / header / footer distance
+    gutter_cm: float = None,
+    gutter_inches: float = None,
+    header_distance_cm: float = None,
+    header_distance_inches: float = None,
+    footer_distance_cm: float = None,
+    footer_distance_inches: float = None,
+    # Section flags
+    different_first_page: bool = None,
+    different_odd_and_even_pages: bool = None,
 ) -> str:
     """Set page layout for a document section.
+
+    Each linear dimension accepts both ``_cm`` and ``_inches``; if both are
+    given, cm wins. Mirrors the parameter set of ``word_live_set_page_layout``
+    so callers can use the same arguments in either mode.
+
+    ``different_odd_and_even_pages`` is a **document-level** setting in the
+    OOXML spec, not section-level — we flip it via ``settings.xml`` here.
 
     Args:
         filename: Path to the Word document.
         section_index: Section number (0-based). Default 0 = first section.
         orientation: "portrait" or "landscape".
-        page_width_inches: Page width in inches.
-        page_height_inches: Page height in inches.
-        margin_top_inches: Top margin in inches.
-        margin_bottom_inches: Bottom margin in inches.
-        margin_left_inches: Left margin in inches.
-        margin_right_inches: Right margin in inches.
+        ...: (each dimension can be given in either cm or inches)
+        different_first_page: Section-level flag for special first-page H/F.
+        different_odd_and_even_pages: Document-level toggle for alternating
+            odd/even headers and footers.
+
+    Returns:
+        JSON with ``changes`` and ``effective`` dict for diff-against-spec.
     """
     filename = ensure_docx_extension(filename)
     if not os.path.exists(filename):
@@ -58,51 +97,89 @@ async def set_page_layout(
         return f"Cannot modify document: {err}"
 
     try:
+        # Resolve all dimensions up front (fail fast on unit mistakes).
+        try:
+            page_w  = _pick_length(page_width_cm,    page_width_inches)
+            page_h  = _pick_length(page_height_cm,   page_height_inches)
+            mtop    = _pick_length(margin_top_cm,    margin_top_inches)
+            mbottom = _pick_length(margin_bottom_cm, margin_bottom_inches)
+            mleft   = _pick_length(margin_left_cm,   margin_left_inches)
+            mright  = _pick_length(margin_right_cm,  margin_right_inches)
+            gutter  = _pick_length(gutter_cm,        gutter_inches)
+            hdist   = _pick_length(header_distance_cm, header_distance_inches)
+            fdist   = _pick_length(footer_distance_cm, footer_distance_inches)
+        except ValueError as ve:
+            return json.dumps({"error": str(ve)})
+
         async with get_file_lock(filename):
             doc = Document(filename)
             if section_index >= len(doc.sections):
                 return f"Section {section_index} does not exist. Document has {len(doc.sections)} section(s)."
 
             section = doc.sections[section_index]
-            changes = []
+            changes: list[str] = []
+            effective: dict[str, object] = {}
+
+            def apply(attr: str, value, label: str):
+                if value is not None:
+                    setattr(section, attr, value)
+                    changes.append(f"{label}={value.cm:.3f}cm")
+                    effective[f"{label}_cm"] = round(value.cm, 4)
 
             if orientation is not None:
                 if orientation.lower() == "landscape":
                     section.orientation = WD_ORIENT.LANDSCAPE
-                    # Swap width/height if needed
                     if section.page_width < section.page_height:
                         section.page_width, section.page_height = section.page_height, section.page_width
                     changes.append("orientation=landscape")
+                    effective["orientation"] = "landscape"
                 elif orientation.lower() == "portrait":
                     section.orientation = WD_ORIENT.PORTRAIT
                     if section.page_width > section.page_height:
                         section.page_width, section.page_height = section.page_height, section.page_width
                     changes.append("orientation=portrait")
+                    effective["orientation"] = "portrait"
 
-            if page_width_inches is not None:
-                section.page_width = Inches(page_width_inches)
-                changes.append(f"width={page_width_inches}in")
-            if page_height_inches is not None:
-                section.page_height = Inches(page_height_inches)
-                changes.append(f"height={page_height_inches}in")
-            if margin_top_inches is not None:
-                section.top_margin = Inches(margin_top_inches)
-                changes.append(f"margin_top={margin_top_inches}in")
-            if margin_bottom_inches is not None:
-                section.bottom_margin = Inches(margin_bottom_inches)
-                changes.append(f"margin_bottom={margin_bottom_inches}in")
-            if margin_left_inches is not None:
-                section.left_margin = Inches(margin_left_inches)
-                changes.append(f"margin_left={margin_left_inches}in")
-            if margin_right_inches is not None:
-                section.right_margin = Inches(margin_right_inches)
-                changes.append(f"margin_right={margin_right_inches}in")
+            apply("page_width",      page_w,  "page_width")
+            apply("page_height",     page_h,  "page_height")
+            apply("top_margin",      mtop,    "margin_top")
+            apply("bottom_margin",   mbottom, "margin_bottom")
+            apply("left_margin",     mleft,   "margin_left")
+            apply("right_margin",    mright,  "margin_right")
+            apply("gutter",          gutter,  "gutter")
+            apply("header_distance", hdist,   "header_distance")
+            apply("footer_distance", fdist,   "footer_distance")
+
+            if different_first_page is not None:
+                section.different_first_page_header_footer = bool(different_first_page)
+                changes.append(f"different_first_page={different_first_page}")
+                effective["different_first_page"] = bool(different_first_page)
+
+            if different_odd_and_even_pages is not None:
+                # Document-level setting in settings.xml. python-docx exposes
+                # this via doc.settings in recent versions; fall back to XML
+                # if the property isn't there.
+                try:
+                    doc.settings.odd_and_even_pages_header_footer = bool(different_odd_and_even_pages)
+                except AttributeError:
+                    settings_el = doc.settings.element
+                    tag = qn('w:evenAndOddHeaders')
+                    existing = settings_el.find(tag)
+                    if different_odd_and_even_pages:
+                        if existing is None:
+                            settings_el.append(parse_xml(f'<w:evenAndOddHeaders {nsdecls("w")}/>'))
+                    else:
+                        if existing is not None:
+                            settings_el.remove(existing)
+                changes.append(f"different_odd_and_even_pages={different_odd_and_even_pages}")
+                effective["different_odd_and_even_pages"] = bool(different_odd_and_even_pages)
 
             doc.save(filename)
         return json.dumps({
             "success": True,
             "section": section_index,
             "changes": changes,
+            "effective": effective,
         })
 
     except Exception as e:

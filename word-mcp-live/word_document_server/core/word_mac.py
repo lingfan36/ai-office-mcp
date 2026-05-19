@@ -5,22 +5,173 @@ Each function is self-contained: builds a JXA script, executes it,
 and returns JSON-compatible results matching the Windows COM tool outputs.
 
 Only works on macOS with Microsoft Word installed.
+
+Performance modes
+-----------------
+Two execution modes for ``_run_jxa``:
+
+* **Default (per-call subprocess)** — every JXA call forks ``osascript``
+  (~100–300 ms per call on a warm system). Simple and stateless.
+* **Persistent (opt-in)** — set ``WORD_MAC_OSA_PERSISTENT=1`` to keep one
+  long-lived ``osascript`` child alive across calls and stream scripts to
+  it through a sentinel-framed pipe. Drops per-call overhead to ~5–15 ms.
+
+The persistent mode is opt-in because JXA stdin handling is sensitive to
+macOS version, Word permissions, and pyenv/poetry process supervision —
+it can't be validated from this repo's Windows CI. Mac users who try it
+should report results so we can flip the default.
 """
 
 import json
 import os
 import subprocess
 import sys
+import threading
 import unicodedata
 from contextlib import contextmanager
+from pathlib import Path
+
+# Persistent mode opts in via env. Sentinel chosen to be JS-comment-safe
+# and extremely unlikely to appear in legitimate JXA output.
+_PERSISTENT = os.environ.get("WORD_MAC_OSA_PERSISTENT", "0").lower() in ("1", "true", "yes")
+_OSA_END = "__OSA_MCP_END_4f9e3a7b__"
+_OSA_OK = "__OSA_MCP_OK_4f9e3a7b__"
+_OSA_ERR = "__OSA_MCP_ERR_4f9e3a7b__"
+
+
+class _OsaSession:
+    """Long-lived ``osascript`` child reading scripts from stdin.
+
+    Protocol:
+      * Each request: ``<jxa-script>\\n``  + ``_OSA_END\\n``  written to stdin.
+      * Each response: ``_OSA_OK\\n<json-or-empty>\\n_OSA_END\\n`` on success,
+        or ``_OSA_ERR\\n<message>\\n_OSA_END\\n`` on JS exception.
+
+    The router script (embedded below) does ``eval()`` on each chunk inside
+    a single ``osascript`` process, so frameworks (AppleEvents, ScriptingBridge)
+    only initialize once.
+    """
+
+    _ROUTER = f"""
+ObjC.import('Foundation');
+var STDIN  = $.NSFileHandle.fileHandleWithStandardInput;
+var STDOUT = $.NSFileHandle.fileHandleWithStandardOutput;
+function _write(s) {{
+    var d = $.NSString.alloc.initWithUTF8String(s).dataUsingEncoding($.NSUTF8StringEncoding);
+    STDOUT.writeData(d);
+}}
+var buf = '';
+var END = '\\n{_OSA_END}\\n';
+function _readScript() {{
+    while (true) {{
+        var i = buf.indexOf(END);
+        if (i >= 0) {{
+            var s = buf.substring(0, i);
+            buf = buf.substring(i + END.length);
+            return s;
+        }}
+        var data = STDIN.availableData;
+        if (data.length === 0) return null;
+        buf += $.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding).js || '';
+    }}
+}}
+while (true) {{
+    var script = _readScript();
+    if (script === null) break;
+    try {{
+        var r = eval(script);
+        var payload = (r === undefined || r === null) ? '' : String(r);
+        _write('{_OSA_OK}\\n' + payload + END);
+    }} catch (e) {{
+        _write('{_OSA_ERR}\\n' + (e && e.message ? e.message : String(e)) + END);
+    }}
+}}
+"""
+
+    def __init__(self):
+        self._proc: subprocess.Popen | None = None
+        self._lock = threading.Lock()
+
+    def _spawn(self) -> None:
+        self._proc = subprocess.Popen(
+            ["/usr/bin/osascript", "-l", "JavaScript"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=0,  # unbuffered
+        )
+        # Send router script first; it never returns (loops on stdin).
+        # Use raw bytes — the router itself reads/writes via NSFileHandle.
+        assert self._proc.stdin is not None
+        self._proc.stdin.write(self._ROUTER.encode("utf-8"))
+        self._proc.stdin.flush()
+
+    def _alive(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
+    def run(self, script: str, timeout: float = 30.0) -> str:
+        with self._lock:
+            if not self._alive():
+                self._spawn()
+            assert self._proc and self._proc.stdin and self._proc.stdout
+
+            try:
+                self._proc.stdin.write((script + "\n" + _OSA_END + "\n").encode("utf-8"))
+                self._proc.stdin.flush()
+            except BrokenPipeError:
+                self._teardown()
+                raise RuntimeError("osascript session died; retry will respawn")
+
+            # Read sentinel-framed response. We block on stdout; a hung Word
+            # would hang us — caller should set timeout via env or wrap call.
+            tag = self._proc.stdout.readline().decode("utf-8", errors="replace").rstrip("\n")
+            payload_lines: list[str] = []
+            for raw in self._proc.stdout:
+                line = raw.decode("utf-8", errors="replace").rstrip("\n")
+                if line == _OSA_END:
+                    break
+                payload_lines.append(line)
+            payload = "\n".join(payload_lines)
+
+            if tag == _OSA_OK:
+                return payload.strip()
+            if tag == _OSA_ERR:
+                if "is not running" in payload or "Connection is invalid" in payload:
+                    raise RuntimeError("Microsoft Word is not running. Please open Word first.")
+                raise RuntimeError(f"JXA error: {payload}")
+            # Unknown protocol state — recycle the process to recover.
+            self._teardown()
+            raise RuntimeError(f"osascript protocol desync (tag={tag!r}); session restarted")
+
+    def _teardown(self) -> None:
+        if self._proc is not None:
+            try:
+                self._proc.kill()
+            except Exception:
+                pass
+            self._proc = None
+
+
+_session: _OsaSession | None = None
+
+
+def _get_session() -> _OsaSession:
+    global _session
+    if _session is None:
+        _session = _OsaSession()
+    return _session
 
 
 def _run_jxa(script: str, timeout: int = 30) -> str:
     """Execute a JXA script via osascript and return stdout.
 
+    Uses a long-lived osascript child when WORD_MAC_OSA_PERSISTENT=1,
+    otherwise forks osascript per call (legacy default).
+
     Args:
         script: JavaScript for Automation code string.
-        timeout: Max seconds to wait.
+        timeout: Max seconds to wait (per-call mode only; persistent mode
+            currently blocks indefinitely on stdout read).
 
     Returns:
         stdout as string (typically JSON from JSON.stringify).
@@ -28,6 +179,9 @@ def _run_jxa(script: str, timeout: int = 30) -> str:
     Raises:
         RuntimeError on timeout or execution error.
     """
+    if _PERSISTENT and sys.platform == "darwin":
+        return _get_session().run(script, timeout=timeout)
+
     result = subprocess.run(
         ["/usr/bin/osascript", "-l", "JavaScript"],
         input=script,

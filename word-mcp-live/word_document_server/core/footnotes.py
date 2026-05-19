@@ -16,9 +16,11 @@ W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 CT_NS = 'http://schemas.openxmlformats.org/package/2006/content-types'
 REL_NS = 'http://schemas.openxmlformats.org/package/2006/relationships'
+XML_NS = 'http://www.w3.org/XML/1998/namespace'  # for xml:space attribute
 
 # Constants
 RESERVED_FOOTNOTE_IDS = {-1, 0, 1}  # Reserved for separators and Word internals
+RESERVED_ENDNOTE_IDS = {-1, 0}  # Endnotes reserve separator + continuationSeparator only
 MIN_FOOTNOTE_ID = -2147483648
 MAX_FOOTNOTE_ID = 32767
 MAX_RELATIONSHIP_ID_LENGTH = 255
@@ -814,6 +816,541 @@ def add_footnote(doc, paragraph_index: int, footnote_text: str):
     return doc
 
 
+# ============================================================================
+# REAL ENDNOTE SUPPORT (parallel to add_footnote_robust, writes real OOXML
+# endnote structures: word/endnotes.xml + w:endnoteReference instead of the
+# legacy "†" superscript text hack).
+# ============================================================================
+
+
+def _get_safe_endnote_id(endnotes_root) -> int:
+    """Get a safe endnote ID avoiding conflicts with separators and existing notes."""
+    nsmap = {'w': W_NS}
+    existing = endnotes_root.xpath('//w:endnote', namespaces=nsmap)
+    used_ids = set()
+    for en in existing:
+        en_id = en.get(f'{{{W_NS}}}id')
+        if en_id:
+            try:
+                used_ids.add(int(en_id))
+            except ValueError:
+                pass
+    # Endnotes can start from 1 (footnotes reserve 1, endnotes do not).
+    candidate_id = 1
+    while candidate_id in used_ids or candidate_id in RESERVED_ENDNOTE_IDS:
+        candidate_id += 1
+        if candidate_id > MAX_FOOTNOTE_ID:
+            raise ValueError("No available endnote IDs")
+    return candidate_id
+
+
+def _create_minimal_endnotes_xml() -> bytes:
+    """Create minimal endnotes.xml with the two required separator notes."""
+    xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:endnotes xmlns:w="{W_NS}">
+    <w:endnote w:type="separator" w:id="-1">
+        <w:p>
+            <w:pPr>
+                <w:spacing w:after="0" w:line="240" w:lineRule="auto"/>
+            </w:pPr>
+            <w:r>
+                <w:separator/>
+            </w:r>
+        </w:p>
+    </w:endnote>
+    <w:endnote w:type="continuationSeparator" w:id="0">
+        <w:p>
+            <w:pPr>
+                <w:spacing w:after="0" w:line="240" w:lineRule="auto"/>
+            </w:pPr>
+            <w:r>
+                <w:continuationSeparator/>
+            </w:r>
+        </w:p>
+    </w:endnote>
+</w:endnotes>'''
+    return xml.encode('utf-8')
+
+
+def _ensure_endnotes_content_type(content_types_xml: bytes) -> bytes:
+    """Register word/endnotes.xml in [Content_Types].xml if not already present."""
+    ct_tree = etree.fromstring(content_types_xml)
+    nsmap = {'ct': CT_NS}
+    existing = ct_tree.xpath(
+        "//ct:Override[@PartName='/word/endnotes.xml']", namespaces=nsmap
+    )
+    if existing:
+        return content_types_xml
+    override = etree.Element(
+        f'{{{CT_NS}}}Override',
+        PartName='/word/endnotes.xml',
+        ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml',
+    )
+    ct_tree.append(override)
+    return etree.tostring(ct_tree, encoding='UTF-8', xml_declaration=True, standalone="yes")
+
+
+def _ensure_endnotes_rels(document_rels_xml: bytes) -> bytes:
+    """Add an endnotes relationship to word/_rels/document.xml.rels if absent."""
+    rels_tree = etree.fromstring(document_rels_xml)
+    nsmap = {'r': REL_NS}
+    existing = rels_tree.xpath(
+        "//r:Relationship[contains(@Type, 'endnotes')]", namespaces=nsmap
+    )
+    if existing:
+        return document_rels_xml
+
+    all_rels = rels_tree.xpath('//r:Relationship', namespaces=nsmap)
+    existing_ids = {rel.get('Id') for rel in all_rels if rel.get('Id')}
+    rid_num = 1
+    while f'rId{rid_num}' in existing_ids:
+        rid_num += 1
+    new_rid = f'rId{rid_num}'
+    if len(new_rid) > MAX_RELATIONSHIP_ID_LENGTH:
+        raise ValueError(f"Relationship ID too long: {new_rid}")
+
+    rel = etree.Element(
+        f'{{{REL_NS}}}Relationship',
+        Id=new_rid,
+        Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes',
+        Target='endnotes.xml',
+    )
+    rels_tree.append(rel)
+    return etree.tostring(rels_tree, encoding='UTF-8', xml_declaration=True, standalone="yes")
+
+
+def _ensure_endnote_styles(styles_root):
+    """Ensure EndnoteReference (character) and EndnoteText (paragraph) styles exist."""
+    nsmap = {'w': W_NS}
+
+    ref_style = styles_root.xpath('//w:style[@w:styleId="EndnoteReference"]', namespaces=nsmap)
+    if not ref_style:
+        style = etree.Element(
+            f'{{{W_NS}}}style',
+            attrib={
+                f'{{{W_NS}}}type': 'character',
+                f'{{{W_NS}}}styleId': 'EndnoteReference',
+            },
+        )
+        name = etree.SubElement(style, f'{{{W_NS}}}name')
+        name.set(f'{{{W_NS}}}val', 'endnote reference')
+        base = etree.SubElement(style, f'{{{W_NS}}}basedOn')
+        base.set(f'{{{W_NS}}}val', 'DefaultParagraphFont')
+        rPr = etree.SubElement(style, f'{{{W_NS}}}rPr')
+        vert_align = etree.SubElement(rPr, f'{{{W_NS}}}vertAlign')
+        vert_align.set(f'{{{W_NS}}}val', 'superscript')
+        styles_root.append(style)
+
+    text_style = styles_root.xpath('//w:style[@w:styleId="EndnoteText"]', namespaces=nsmap)
+    if not text_style:
+        style = etree.Element(
+            f'{{{W_NS}}}style',
+            attrib={
+                f'{{{W_NS}}}type': 'paragraph',
+                f'{{{W_NS}}}styleId': 'EndnoteText',
+            },
+        )
+        name = etree.SubElement(style, f'{{{W_NS}}}name')
+        name.set(f'{{{W_NS}}}val', 'endnote text')
+        base = etree.SubElement(style, f'{{{W_NS}}}basedOn')
+        base.set(f'{{{W_NS}}}val', 'Normal')
+        pPr = etree.SubElement(style, f'{{{W_NS}}}pPr')
+        sz = etree.SubElement(pPr, f'{{{W_NS}}}sz')
+        sz.set(f'{{{W_NS}}}val', '20')
+        styles_root.append(style)
+
+
+def add_endnote_robust(
+    filename: str,
+    search_text: Optional[str] = None,
+    paragraph_index: Optional[int] = None,
+    endnote_text: str = "",
+    output_filename: Optional[str] = None,
+    position: str = "after",
+    validate_location: bool = True,
+) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """Add an endnote with full OOXML compliance.
+
+    Mirrors ``add_footnote_robust`` but writes ``<w:endnote>`` /
+    ``<w:endnoteReference>`` into ``word/endnotes.xml`` (creating that part,
+    its content-type override, its relationship, and the EndnoteReference /
+    EndnoteText styles if needed). Word recognises the result as a native
+    endnote (visible in View > Endnotes, accept/reject via Review pane).
+
+    Use exactly one of ``search_text`` (find first matching paragraph) or
+    ``paragraph_index`` (0-based across all body paragraphs).
+    """
+    if not search_text and paragraph_index is None:
+        return False, "Must provide either search_text or paragraph_index", None
+    if search_text and paragraph_index is not None:
+        return False, "Cannot provide both search_text and paragraph_index", None
+    if not os.path.exists(filename):
+        return False, f"File not found: {filename}", None
+
+    working_file = output_filename if output_filename else filename
+    if output_filename and filename != output_filename:
+        import shutil
+        shutil.copy2(filename, output_filename)
+
+    try:
+        doc_parts = {}
+        with zipfile.ZipFile(filename, 'r') as zin:
+            doc_parts['document'] = zin.read('word/document.xml')
+            doc_parts['content_types'] = zin.read('[Content_Types].xml')
+            doc_parts['document_rels'] = zin.read('word/_rels/document.xml.rels')
+            if 'word/endnotes.xml' in zin.namelist():
+                doc_parts['endnotes'] = zin.read('word/endnotes.xml')
+            else:
+                doc_parts['endnotes'] = _create_minimal_endnotes_xml()
+            if 'word/styles.xml' in zin.namelist():
+                doc_parts['styles'] = zin.read('word/styles.xml')
+            else:
+                doc_parts['styles'] = (
+                    b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                    b'<w:styles xmlns:w="' + W_NS.encode('ascii') + b'"/>'
+                )
+
+        doc_root = etree.fromstring(doc_parts['document'])
+        endnotes_root = etree.fromstring(doc_parts['endnotes'])
+        styles_root = etree.fromstring(doc_parts['styles'])
+
+        nsmap = {'w': W_NS}
+
+        if search_text:
+            target_para = None
+            for para in doc_root.xpath('//w:p', namespaces=nsmap):
+                para_text = ''.join(para.xpath('.//w:t/text()', namespaces=nsmap))
+                if search_text in para_text:
+                    target_para = para
+                    break
+            if target_para is None:
+                return False, f"Text '{search_text}' not found in document", None
+        else:
+            paragraphs = doc_root.xpath('//w:p', namespaces=nsmap)
+            if paragraph_index >= len(paragraphs):
+                return False, f"Paragraph index {paragraph_index} out of range", None
+            target_para = paragraphs[paragraph_index]
+
+        if validate_location:
+            parent = target_para.getparent()
+            while parent is not None:
+                if parent.tag in [f'{{{W_NS}}}hdr', f'{{{W_NS}}}ftr']:
+                    return False, "Cannot add endnote in header/footer", None
+                parent = parent.getparent()
+
+        endnote_id = _get_safe_endnote_id(endnotes_root)
+
+        if position == "after":
+            runs = target_para.xpath('.//w:r', namespaces=nsmap)
+            insert_pos = target_para.index(runs[-1]) + 1 if runs else len(target_para)
+        else:
+            runs = target_para.xpath('.//w:r[w:t]', namespaces=nsmap)
+            insert_pos = target_para.index(runs[0]) if runs else 0
+
+        # Build the endnote reference run in the body.
+        ref_run = etree.Element(f'{{{W_NS}}}r')
+        rPr = etree.SubElement(ref_run, f'{{{W_NS}}}rPr')
+        rStyle = etree.SubElement(rPr, f'{{{W_NS}}}rStyle')
+        rStyle.set(f'{{{W_NS}}}val', 'EndnoteReference')
+        en_ref = etree.SubElement(ref_run, f'{{{W_NS}}}endnoteReference')
+        en_ref.set(f'{{{W_NS}}}id', str(endnote_id))
+        target_para.insert(insert_pos, ref_run)
+
+        # Build the endnote content paragraph inside word/endnotes.xml.
+        new_endnote = etree.Element(
+            f'{{{W_NS}}}endnote',
+            attrib={f'{{{W_NS}}}id': str(endnote_id)},
+        )
+        en_para = etree.SubElement(new_endnote, f'{{{W_NS}}}p')
+        pPr = etree.SubElement(en_para, f'{{{W_NS}}}pPr')
+        pStyle = etree.SubElement(pPr, f'{{{W_NS}}}pStyle')
+        pStyle.set(f'{{{W_NS}}}val', 'EndnoteText')
+
+        marker_run = etree.SubElement(en_para, f'{{{W_NS}}}r')
+        marker_rPr = etree.SubElement(marker_run, f'{{{W_NS}}}rPr')
+        marker_rStyle = etree.SubElement(marker_rPr, f'{{{W_NS}}}rStyle')
+        marker_rStyle.set(f'{{{W_NS}}}val', 'EndnoteReference')
+        etree.SubElement(marker_run, f'{{{W_NS}}}endnoteRef')
+
+        space_run = etree.SubElement(en_para, f'{{{W_NS}}}r')
+        space_text = etree.SubElement(space_run, f'{{{W_NS}}}t')
+        space_text.set(f'{{{XML_NS}}}space', 'preserve')
+        space_text.text = ' '
+
+        text_run = etree.SubElement(en_para, f'{{{W_NS}}}r')
+        text_elem = etree.SubElement(text_run, f'{{{W_NS}}}t')
+        text_elem.text = endnote_text
+
+        endnotes_root.append(new_endnote)
+        _ensure_endnote_styles(styles_root)
+
+        content_types_xml = _ensure_endnotes_content_type(doc_parts['content_types'])
+        document_rels_xml = _ensure_endnotes_rels(doc_parts['document_rels'])
+
+        # Write package: copy unchanged parts, overwrite the five we touched.
+        temp_file = working_file + '.tmp'
+        rewritten = {
+            'word/document.xml',
+            'word/endnotes.xml',
+            'word/styles.xml',
+            '[Content_Types].xml',
+            'word/_rels/document.xml.rels',
+        }
+        with zipfile.ZipFile(temp_file, 'w', zipfile.ZIP_DEFLATED) as zout:
+            with zipfile.ZipFile(filename, 'r') as zin:
+                for item in zin.infolist():
+                    if item.filename not in rewritten:
+                        zout.writestr(item, zin.read(item.filename))
+            zout.writestr(
+                'word/document.xml',
+                etree.tostring(doc_root, encoding='UTF-8', xml_declaration=True, standalone="yes"),
+            )
+            zout.writestr(
+                'word/endnotes.xml',
+                etree.tostring(endnotes_root, encoding='UTF-8', xml_declaration=True, standalone="yes"),
+            )
+            zout.writestr(
+                'word/styles.xml',
+                etree.tostring(styles_root, encoding='UTF-8', xml_declaration=True, standalone="yes"),
+            )
+            zout.writestr('[Content_Types].xml', content_types_xml)
+            zout.writestr('word/_rels/document.xml.rels', document_rels_xml)
+
+        os.replace(temp_file, working_file)
+
+        return True, f"Successfully added endnote (ID: {endnote_id}) to {working_file}", {
+            'endnote_id': endnote_id,
+            'location': 'search_text' if search_text else 'paragraph_index',
+            'styles_created': ['EndnoteReference', 'EndnoteText'],
+        }
+
+    except Exception as e:
+        temp_file = working_file + '.tmp'
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except OSError:
+                pass
+        return False, f"Error adding endnote: {str(e)}", None
+
+
+def convert_footnotes_to_endnotes_robust(
+    filename: str,
+    output_filename: Optional[str] = None,
+) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """Convert every footnote in the document to a native endnote.
+
+    For each non-separator entry in ``word/footnotes.xml``:
+
+    1. Deep-copy the footnote XML into ``word/endnotes.xml`` under a freshly
+       allocated endnote id, rewriting tag/style names along the way:
+       ``w:footnote`` → ``w:endnote``,
+       ``w:footnoteRef`` → ``w:endnoteRef``,
+       ``pStyle w:val="FootnoteText"`` → ``EndnoteText``,
+       ``rStyle w:val="FootnoteReference"`` → ``EndnoteReference``.
+    2. Remove the original footnote body from ``word/footnotes.xml`` (the
+       separator + continuationSeparator entries are kept so the part stays
+       valid).
+    3. Walk every ``<w:footnoteReference w:id="X"/>`` in ``word/document.xml``,
+       rename it to ``<w:endnoteReference w:id="Y"/>`` via the id map, and
+       flip the surrounding ``rStyle`` from FootnoteReference to
+       EndnoteReference.
+    4. Ensure the endnotes part is registered in ``[Content_Types].xml`` and
+       ``document.xml.rels`` and that EndnoteReference / EndnoteText styles
+       exist. (Footnote styles are left in place — other content may still
+       reference them.)
+
+    Pre-existing endnotes are preserved; new ids skip over them and the
+    reserved separator ids -1 / 0.
+
+    Returns ``(success, message, details)`` where ``details`` contains an
+    ``id_mapping`` ``{old_footnote_id: new_endnote_id}``.
+    """
+    from copy import deepcopy
+
+    if not os.path.exists(filename):
+        return False, f"File not found: {filename}", None
+
+    working_file = output_filename if output_filename else filename
+    if output_filename and filename != output_filename:
+        import shutil
+        shutil.copy2(filename, output_filename)
+
+    nsmap = {'w': W_NS}
+
+    try:
+        with zipfile.ZipFile(filename, 'r') as zin:
+            names = zin.namelist()
+            if 'word/footnotes.xml' not in names:
+                return False, "Document has no footnotes part to convert", None
+            doc_xml = zin.read('word/document.xml')
+            footnotes_xml = zin.read('word/footnotes.xml')
+            endnotes_xml = (
+                zin.read('word/endnotes.xml') if 'word/endnotes.xml' in names
+                else _create_minimal_endnotes_xml()
+            )
+            content_types_xml = zin.read('[Content_Types].xml')
+            document_rels_xml = zin.read('word/_rels/document.xml.rels')
+            if 'word/styles.xml' in names:
+                styles_xml = zin.read('word/styles.xml')
+            else:
+                styles_xml = (
+                    b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                    b'<w:styles xmlns:w="' + W_NS.encode('ascii') + b'"/>'
+                )
+
+        doc_root = etree.fromstring(doc_xml)
+        footnotes_root = etree.fromstring(footnotes_xml)
+        endnotes_root = etree.fromstring(endnotes_xml)
+        styles_root = etree.fromstring(styles_xml)
+
+        # Collect non-separator footnotes to convert.
+        footnotes_to_convert = []
+        for fn in footnotes_root.xpath('//w:footnote', namespaces=nsmap):
+            fn_type = fn.get(f'{{{W_NS}}}type')
+            if fn_type in ('separator', 'continuationSeparator'):
+                continue
+            fn_id_str = fn.get(f'{{{W_NS}}}id')
+            try:
+                fn_id_int = int(fn_id_str)
+            except (TypeError, ValueError):
+                continue
+            if fn_id_int in RESERVED_FOOTNOTE_IDS - {1}:
+                # 1 is "reserved" only at allocation time for our adder; if a
+                # real footnote already sits at id 1 we still convert it.
+                continue
+            footnotes_to_convert.append(fn)
+
+        if not footnotes_to_convert:
+            return False, "Document has no convertible footnotes (only separators present)", None
+
+        # Existing endnote ids that we must not collide with.
+        existing_endnote_ids = set()
+        for en in endnotes_root.xpath('//w:endnote', namespaces=nsmap):
+            try:
+                existing_endnote_ids.add(int(en.get(f'{{{W_NS}}}id')))
+            except (TypeError, ValueError):
+                pass
+
+        next_id = 1
+        def _alloc_id() -> int:
+            nonlocal next_id
+            while next_id in existing_endnote_ids or next_id in RESERVED_ENDNOTE_IDS:
+                next_id += 1
+            chosen = next_id
+            existing_endnote_ids.add(chosen)
+            next_id += 1
+            return chosen
+
+        id_map: Dict[int, int] = {}
+
+        for fn in footnotes_to_convert:
+            old_id = int(fn.get(f'{{{W_NS}}}id'))
+            new_id = _alloc_id()
+            id_map[old_id] = new_id
+
+            # Deep-copy and transform: footnote → endnote.
+            en = deepcopy(fn)
+            en.tag = f'{{{W_NS}}}endnote'
+            en.set(f'{{{W_NS}}}id', str(new_id))
+
+            for fn_ref in en.iter(f'{{{W_NS}}}footnoteRef'):
+                fn_ref.tag = f'{{{W_NS}}}endnoteRef'
+            for pStyle in en.iter(f'{{{W_NS}}}pStyle'):
+                if pStyle.get(f'{{{W_NS}}}val') == 'FootnoteText':
+                    pStyle.set(f'{{{W_NS}}}val', 'EndnoteText')
+            for rStyle in en.iter(f'{{{W_NS}}}rStyle'):
+                if rStyle.get(f'{{{W_NS}}}val') == 'FootnoteReference':
+                    rStyle.set(f'{{{W_NS}}}val', 'EndnoteReference')
+
+            endnotes_root.append(en)
+
+        # Remove the original footnote bodies (keep separators intact).
+        for fn in footnotes_to_convert:
+            parent = fn.getparent()
+            if parent is not None:
+                parent.remove(fn)
+
+        # Rewrite body references: <w:footnoteReference> → <w:endnoteReference>.
+        body_changes = 0
+        for fn_ref in doc_root.xpath('//w:footnoteReference', namespaces=nsmap):
+            old_id_str = fn_ref.get(f'{{{W_NS}}}id')
+            try:
+                old_id = int(old_id_str)
+            except (TypeError, ValueError):
+                continue
+            if old_id not in id_map:
+                continue  # Was a separator reference or unknown; skip.
+            fn_ref.tag = f'{{{W_NS}}}endnoteReference'
+            fn_ref.set(f'{{{W_NS}}}id', str(id_map[old_id]))
+
+            parent_run = fn_ref.getparent()
+            if parent_run is not None:
+                for rStyle in parent_run.iter(f'{{{W_NS}}}rStyle'):
+                    if rStyle.get(f'{{{W_NS}}}val') == 'FootnoteReference':
+                        rStyle.set(f'{{{W_NS}}}val', 'EndnoteReference')
+            body_changes += 1
+
+        # Make sure the endnote infrastructure is registered.
+        _ensure_endnote_styles(styles_root)
+        content_types_xml = _ensure_endnotes_content_type(content_types_xml)
+        document_rels_xml = _ensure_endnotes_rels(document_rels_xml)
+
+        # Repackage.
+        temp_file = working_file + '.tmp'
+        rewritten = {
+            'word/document.xml',
+            'word/footnotes.xml',
+            'word/endnotes.xml',
+            'word/styles.xml',
+            '[Content_Types].xml',
+            'word/_rels/document.xml.rels',
+        }
+        with zipfile.ZipFile(temp_file, 'w', zipfile.ZIP_DEFLATED) as zout:
+            with zipfile.ZipFile(filename, 'r') as zin:
+                for item in zin.infolist():
+                    if item.filename not in rewritten:
+                        zout.writestr(item, zin.read(item.filename))
+            zout.writestr(
+                'word/document.xml',
+                etree.tostring(doc_root, encoding='UTF-8', xml_declaration=True, standalone="yes"),
+            )
+            zout.writestr(
+                'word/footnotes.xml',
+                etree.tostring(footnotes_root, encoding='UTF-8', xml_declaration=True, standalone="yes"),
+            )
+            zout.writestr(
+                'word/endnotes.xml',
+                etree.tostring(endnotes_root, encoding='UTF-8', xml_declaration=True, standalone="yes"),
+            )
+            zout.writestr(
+                'word/styles.xml',
+                etree.tostring(styles_root, encoding='UTF-8', xml_declaration=True, standalone="yes"),
+            )
+            zout.writestr('[Content_Types].xml', content_types_xml)
+            zout.writestr('word/_rels/document.xml.rels', document_rels_xml)
+
+        os.replace(temp_file, working_file)
+
+        return True, (
+            f"Converted {len(id_map)} footnote(s) to endnote(s); "
+            f"updated {body_changes} body reference(s)"
+        ), {
+            'converted': len(id_map),
+            'body_references_updated': body_changes,
+            'id_mapping': {str(k): v for k, v in id_map.items()},
+        }
+
+    except Exception as e:
+        temp_file = working_file + '.tmp'
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except OSError:
+                pass
+        return False, f"Error converting footnotes to endnotes: {str(e)}", None
+
+
 def add_endnote(doc, paragraph_index: int, endnote_text: str):
     """Legacy function for adding endnotes."""
     if paragraph_index >= len(doc.paragraphs):
@@ -838,5 +1375,4 @@ def convert_footnotes_to_endnotes(doc):
     return doc
 
 
-# Define XML_NS if needed
-XML_NS = 'http://www.w3.org/XML/1998/namespace'
+# XML_NS is defined near the top of the module alongside W_NS, R_NS, etc.

@@ -5,6 +5,107 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-05-18
+
+### Added
+- **`word_audit_against_spec` — the verification tool that breaks "AI says done" away from "actually done".** Takes a structured JSON spec (list of `{"id": "<dotted.path>", "expected": <value>}` items) and a `.docx`, reads the document via python-docx + lxml, dispatches each id to a registered checker, and returns:
+  ```json
+  {
+    "pass_count": N,
+    "fail_count": M,
+    "items": [
+      { "id": "...", "expected": ..., "actual": ..., "pass": false, "fix_hint": "..." }
+    ]
+  }
+  ```
+  Designed to be invoked by the caller (AI or human) immediately before declaring completion — combined with a CLAUDE.md rule that requires the audit JSON to be surfaced before any "done" claim, this physically prevents silent omissions.
+
+- **Initial checker library** (`word_document_server/tools/audit_tools.py::CHECKERS`) covers 25+ id namespaces:
+  - `page.*` — margins, gutter, header/footer distance, odd/even pages
+  - `body.*` — East Asia font, ASCII font, size, line spacing on body paragraphs
+  - `heading1.*` / `heading2.*` — font, size, alignment per heading level
+  - `headings.no_level_skip` — detects 1→1.1.1 style skips
+  - `patterns.max_consecutive_blank_paragraphs` — caps blank-paragraph runs
+  - `patterns.no_forbidden_body_fonts` — blocks Calibri / Arial / 楷体 etc. leakage into body
+  - `patterns.no_red_body_text` — flags red runs in body
+  - `patterns.no_halfwidth_punct_in_cjk` — catches `.` `,` `;` mixed into CJK paragraphs
+  - `patterns.keywords_separator` — verifies 关键词 uses `；` and Keywords uses `;`
+  - `references.numbering_format` — every entry starts with `[N]`
+
+- **Extensible by design**: adding a new check is one entry in `CHECKERS` + one function. Each failing item carries an optional `fix_hint` pointing at the MCP tool that would repair it.
+
+- **Demonstrated**: on a freshly generated bad thesis with all 16+ seeded problems, audit catches 23/25 items as FAIL with accurate expected/actual readouts. The 2 PASS items are vacuously-true cases (e.g. no real heading styles → no level-skip possible).
+
+### Recommended CLAUDE.md addition
+
+For users who want to enforce audit-before-done at the agent level, add:
+
+```
+## 排版任务完成判定
+- 涉及 .docx 排版的任务，完成前必须调用 word_audit_against_spec
+- 必须把 audit 返回的 JSON 完整 paste 在最后一条消息里
+- fail_count > 0 时不得声明"完成"，必须先修后再 audit
+- 调 audit 前先 word_live_save，确保磁盘状态等于编辑状态
+```
+
+## [1.7.3] - 2026-05-18
+
+### Added
+- **`set_page_layout` / `word_live_set_page_layout` — 5 new properties + cm unit support.** Page setup is the most common task that fails the "spec → checklist" cross-check (header/footer distance from edge, gutter, alternating odd/even headers — all spec-required, none previously settable via MCP, callers had to drop to COM). Both tools now accept:
+  - `gutter_cm` / `gutter_inches` — binding margin for double-sided print.
+  - `header_distance_cm` / `header_distance_inches` — distance from page edge to header band.
+  - `footer_distance_cm` / `footer_distance_inches` — distance from page edge to footer band.
+  - `different_first_page` — section-level toggle for cover-page header/footer.
+  - `different_odd_and_even_pages` — document-level toggle (cross-platform path writes ``<w:evenAndOddHeaders/>`` to settings.xml; live path uses ``Section.PageSetup.OddAndEvenPagesHeaderFooter``).
+- **Every existing dimension param now has a `_cm` twin** (`page_width_cm`, `margin_top_cm`, etc.). If both `_cm` and `_inches` are supplied for the same dimension, cm wins and a note is attached to the response. Removes the cm→in mental arithmetic that AI clients kept botching against Chinese / EU style specs.
+
+### Changed
+- **Response now carries `effective` / `effective_pt` dict** — every dimension actually written is echoed back in its canonical unit (cm for cross-platform, points for live). Lets callers diff against spec without re-reading the document. Same pattern as 1.7.2's `effective_line_spacing_pt`.
+- **Range validation** — values larger than ~56 inches now raise before touching the document (caught a class of "passing twentieths-of-a-point thinking they're inches" errors).
+
+## [1.7.2] - 2026-05-18
+
+### Fixed
+- **`word_live_set_paragraph_spacing` line-spacing semantics** — Word COM's `Paragraph.LineSpacing` is always in points, including when `LineSpacingRule = wdLineSpaceMultiple`. The previous implementation forwarded the raw `line_spacing` argument unchanged, so calling with `line_spacing=1.5, line_spacing_rule="multiple"` produced 1.5-pt fixed line height (text physically overlaps) instead of 1.5× spacing. The tool now:
+  - Treats `line_spacing` as a **multiplier** under `rule="multiple"` and converts to points internally as `value × 12`. Values > 10 are kept as-is to preserve any caller that pre-multiplied.
+  - **Inferrs the rule** when `line_spacing_rule` is omitted: `value ≤ 10` → multiple (×12 conversion), `value > 10` → exactly (raw points).
+  - **Ignores `line_spacing` for preset rules** (`single` / `1.5_lines` / `double`) — Word computes the points itself; previous behavior of overwriting the preset with a stray number is gone.
+  - **Sets `LineSpacingRule` before `LineSpacing`** so Word doesn't reinterpret the value during assignment.
+  - Returns `effective_line_spacing_rule` and `effective_line_spacing_pt` in the response payload for easy verification.
+- macOS JXA `mac_set_paragraph_spacing` still accepts only raw points and does not honor `line_spacing_rule`. Now documented; full parity is deferred.
+
+## [1.7.1] - 2026-05-18
+
+### Fixed
+- **All `word_live_*` write operations timing out at 3 s after upgrading to 1.7.0** — the new cross-thread liveness probe in `_com_guard` deadlocked against Word's STA marshalling. The probe ran on a daemon thread but called a property on a COM proxy bound to the main thread's STA; completing that RPC requires the main thread to pump Win32 messages, but the main thread was parked in `Event.wait(timeout)` and never pumped. Every write therefore appeared to "find Word frozen" and returned a misleading "Word is unresponsive" error after `WORD_COM_LIVENESS_TIMEOUT`. Reads bypassed the guard and were unaffected.
+  - **Default behaviour change**: liveness probe is now **disabled by default**. Set `WORD_COM_LIVENESS_PROBE=1` to opt in.
+  - When opted in, `_probe_with_timeout` now interleaves `pythoncom.PumpWaitingMessages()` while waiting on the worker thread, so the STA marshalling can complete and the probe behaves correctly.
+  - The `_app_lock` serialization (the actually-load-bearing part of 1.7.0's concurrency fix) is unchanged and still active.
+
+## [1.7.0] - 2026-05-18
+
+### Added
+- **Concurrent-COM safety in `word_document_server/core/word_com.py`** — a reentrant `_app_lock`, a daemon-thread liveness probe, and two context managers (`undo_record` now wraps the lock+probe; new `com_session` for read-only callers). Two parallel tool calls no longer race on the singleton `_app` (the source of the "transient COM marshalling failures after MCP reconnect" symptom in 1.6.0). When Word is frozen by a modal dialog, calls now raise a descriptive error after `WORD_COM_LIVENESS_TIMEOUT` (default 3 s) instead of hanging the server. Lock acquisition fails fast after `WORD_COM_LOCK_TIMEOUT` (default 30 s); both knobs are env-tunable.
+- **Real native endnotes** — `add_endnote_to_document` now writes a proper `<w:endnoteReference>` + `word/endnotes.xml` entry (creating the part, content-type override, relationship, and `EndnoteReference` / `EndnoteText` styles when missing). Previous releases inserted a literal "†" superscript and a fake "Endnotes:" heading paragraph — Word did not recognise those as endnotes. Backed by new `core/footnotes.py::add_endnote_robust`.
+- **Real footnote → endnote conversion** — `convert_footnotes_to_endnotes_in_document` now deep-copies each non-separator footnote into `word/endnotes.xml` under a freshly allocated id (skipping pre-existing endnote ids and reserved separator ids -1/0), rewrites every `<w:footnoteReference>` in the body to `<w:endnoteReference>`, and flips the surrounding `rStyle` from `FootnoteReference` to `EndnoteReference`. Previous releases scanned for "¹²³…" superscript runs and appended a fake heading — the output was not a real conversion. Backed by new `core/footnotes.py::convert_footnotes_to_endnotes_robust`.
+- **Opt-in persistent osascript session on macOS** (`WORD_MAC_OSA_PERSISTENT=1`) — keeps one `osascript` child alive across JXA calls via a sentinel-framed stdin protocol, dropping per-call overhead from ~100–300 ms to ~5–15 ms. Default remains per-call subprocess for zero regression risk; flip on per-session to validate.
+
+### Fixed
+- **`add_footnote_before_text_robust`** — previously delegated to `add_footnote_robust_tool` which has no `position` parameter, so the tool silently inserted the footnote *after* the matched text. Now calls the lower-level `add_footnote_robust` directly with `position="before"`.
+- **`add_footnote_to_document`** — removed the legacy fallback path that inserted a literal "¹" character and a fake "Footnotes:" heading when `python-docx.add_footnote()` was unavailable. The fallback produced invalid documents. The tool now always delegates to `add_footnote_robust`.
+
+### Changed
+- **`word_document_server/main.py` split** — `register_tools()` (2620 lines of `@mcp.tool` decorators) moved verbatim into a new `word_document_server/tool_registry.py::register_all_tools(mcp)`. `main.py` shrinks from 2808 to 153 lines and now only handles transport configuration, optional `.env` loading, save/path monkeypatches, and server lifecycle. No tool signatures change.
+- **`tracked_changes_tools.py` deprecation notice** — the cross-platform OOXML-based `track_replace` / `track_insert` / `track_delete` / `list_tracked_changes` / `accept_tracked_changes` / `reject_tracked_changes` tools now prefix their docstrings with `[DEPRECATED for production: prefer word_live_*]` and document the per-tool migration mapping. Behaviour is unchanged; only the visible description is updated so AI clients route to Word's native revision engine when available.
+- **`add_footnote_enhanced` deprecation notice** — same behaviour as `add_footnote_robust`; docstring now points there.
+- **`add_footnote_robust_tool` marked CANONICAL** — docstring lists the four older entry points it supersedes.
+- **README.md** — top-line marketing now leads with "Native tracked changes / Per-action Ctrl+Z / Data-loss safeguards / Live editing" instead of "124 tools / Cross-platform". The "Data-loss safeguards" section enumerates the control-byte filter, zero-length wildcard guard, 32K InsertBefore auto-chunking, and concurrent-COM lock + liveness probe. The headline tool count is now "100+ tools" with a pointer to `tool_registry.py` for the exact list (reconciling the 76+41+33 / 115 / 124 numbers that previously disagreed across README/TOOLS.md/CHANGELOG).
+- **`__version__`** in `word_document_server/__init__.py` synced to `1.7.0` (was stuck at `1.2.0` for several releases).
+
+### Internal
+- `XML_NS` constant moved from the bottom of `core/footnotes.py` to the top constants block alongside `W_NS` / `R_NS` / `CT_NS` / `REL_NS`, removing a forward-reference oddity that depended on module-globals late binding.
+- Five new helpers in `core/footnotes.py` parallel to the existing footnote helpers: `_get_safe_endnote_id`, `_create_minimal_endnotes_xml`, `_ensure_endnotes_content_type`, `_ensure_endnotes_rels`, `_ensure_endnote_styles`.
+
 ## [1.6.0] - 2026-04-29
 
 ### Added

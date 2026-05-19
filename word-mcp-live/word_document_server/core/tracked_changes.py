@@ -6,6 +6,15 @@ using lxml to manipulate the underlying OOXML structure. python-docx doesn't
 support tracked changes natively, so we work directly with the XML.
 
 Reference: Anthropic docx skill SKILL.md tracked changes patterns.
+
+⚠️  DEPRECATED FOR PRODUCTION USE
+---------------------------------
+Direct OOXML manipulation produces "tracked-looking" revisions but cannot
+match Word's native revision engine on author/timestamp ownership, w:id
+allocation, or reviewing-pane behavior. For production workflows, prefer
+the COM (Windows) / JXA (macOS) live tools — they go through Word's own
+``TrackRevisions = True`` and Document.Revisions API. See
+``tools/tracked_changes_tools.py`` for migration mapping.
 """
 
 from word_document_server.defaults import DEFAULT_AUTHOR

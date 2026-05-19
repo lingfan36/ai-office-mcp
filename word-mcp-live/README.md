@@ -6,7 +6,7 @@
 
 **The only MCP server that edits Word documents while they're open**
 
-`Live editing` &middot; `Tracked changes` &middot; `Per-action undo` &middot; `124 tools` &middot; `Cross-platform`
+`Native tracked changes` &middot; `Per-action Ctrl+Z` &middot; `Data-loss safeguards` &middot; `Live editing` &middot; `Cross-platform`
 
 [![PyPI](https://img.shields.io/pypi/v/word-mcp-live?color=blue)](https://pypi.org/project/word-mcp-live/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
@@ -50,13 +50,18 @@ https://github.com/user-attachments/assets/fbb09af4-1e25-4e49-94d0-45b363278810
 
 ## What Sets This Apart
 
-- **Live editing** — Edit documents while they're open in Word. No save-close-reopen cycle.
-- **Full undo** — Every AI action is a single Ctrl+Z. Made a mistake? Just undo it.
-- **Native tracked changes** — Real Word revisions with your name, not XML hacks.
-- **Threaded comments** — Add, reply, resolve, and delete comments like a human reviewer.
-- **Layout diagnostics** — Detects formatting problems before they become print disasters.
-- **Equations & cross-references** — Insert math formulas and auto-updating references.
-- **124 tools** — The most comprehensive Word MCP server available.
+- **Native tracked changes** — Wraps Word's own `Document.TrackRevisions = True`, not lxml/OOXML hacks. Author, timestamp, and reviewer-pane behavior match revisions made by a human editor. Cross-platform fallback exists but is marked deprecated for production — see [CHANGELOG](CHANGELOG.md).
+- **Real per-action Ctrl+Z** — Every AI tool call becomes a single entry in Word's undo stack via `Document.UndoRecord.StartCustomRecord`. Made a mistake? One keystroke reverts it.
+- **Data-loss safeguards** *(things that have actually broken in production and we fixed)*:
+  - **Control-byte filter** — `\x07` (cell separator) passed to find-and-replace previously matched across table cells and could empty an entire document. Now rejected at the boundary with a descriptive error.
+  - **Zero-length wildcard guard** — `Find.Execute` with patterns like `*` no longer infinite-loops; 50K replacement ceiling as belt-and-braces.
+  - **32K auto-chunking** — Word COM `InsertBefore`/`InsertAfter` silently truncate past ~32K chars; we split and stitch automatically.
+  - **Concurrent-COM lock + liveness probe** — Two parallel tool calls no longer race on the COM proxy; a frozen Word (modal dialog) raises a clear error instead of hanging the server.
+- **Live editing** — Operates on documents currently open in Word. No save-close-reopen cycle.
+- **Threaded comments** *(Windows)* — Add, reply, resolve, and delete comments like a human reviewer.
+- **Layout diagnostics** — Scans for `keep_with_next` chains, broken style references, and section-break issues before they become print disasters.
+- **Equations & cross-references** — Insert UnicodeMath formulas and auto-updating references to headings, bookmarks, figures, tables.
+- **100+ tools** across cross-platform and live modes — see [TOOLS.md](TOOLS.md) for the full list.
 
 ## Quick Start
 
@@ -334,15 +339,75 @@ The replacements appear as tracked changes in Word with strikethrough on "ABC Co
 ```
 The comment appears in Word's Review panel, anchored to the specified text.
 
+## Workflow Rules for AI Agents
+
+When an LLM agent uses this MCP for document formatting work, two failure modes recur regardless of the underlying model: **silent omissions** ("AI said it changed margins but didn't") and **scope creep** ("AI also rewrote three other things you didn't ask for"). Adding the two rules below to your agent's system prompt or `CLAUDE.md` makes both failure modes structurally hard to hit.
+
+### Rule 1 — Audit-before-done (catches omissions)
+
+Any `.docx` formatting task must end with a `word_audit_against_spec` call whose JSON output is pasted verbatim into the agent's final message. `fail_count > 0` is not "done".
+
+Required workflow:
+
+1. Ask the user for a JSON spec, or convert their natural-language spec into `[{ "id": "<dotted.path>", "expected": <value> }, …]` and confirm.
+2. Make edits via `word_live_*` or cross-platform tools.
+3. Call `word_live_save` (the audit reads from disk, not from Word's in-memory state).
+4. Call `word_audit_against_spec(filename=…, spec_path=…)`.
+5. If `fail_count > 0`, follow each item's `fix_hint`, then loop to step 3.
+6. Only when `fail_count == 0`, declare completion **and paste the full audit JSON** as evidence.
+
+Boundaries:
+
+- The registered checkers live in `word_document_server/tools/audit_tools.py::CHECKERS`. Spec items the audit doesn't cover must be **explicitly listed** by the agent with the verification method used (PDF render, manual check, `word_diff`) — never silently skipped.
+- `unknown_count > 0` means the spec references a checker that isn't registered. Treat it as a fail until the checker is added or the spec is corrected.
+- When audit cannot run (non-`.docx` task, missing file), the agent must say so explicitly, not pretend the audit happened.
+
+### Rule 2 — Minimum-change principle (catches scope creep)
+
+The agent does only what was explicitly requested. Scope is made explicit through a three-step contract, not left to the model's judgement.
+
+1. **Before acting**, restate the scope: "I will do: [1, 2, 3]", each item mapped back to a user sentence. Separately list "noticed but not doing" items. When the request is ambiguous, ask before acting.
+2. **During each edit**, verify the change maps to a scope item. If it doesn't, stop and ask.
+3. **At completion**, deliver in two sections:
+   - ✅ **Done** — checked against the scope list
+   - ⚠️ **Noticed but not done** — listed for the user to commission separately
+
+Danger signals — when these words appear in your own reasoning, stop and ask:
+
+- "while I'm here / since I'm here / and also" — 90% chance it's scope creep
+- "for consistency / to match / for completeness" — not the current task
+- "for future-proofing / defensively / for robustness" — preventive expansion the user didn't request
+
+Forbidden by default (unless explicitly requested):
+
+- Editing README / CHANGELOG / unrelated docstrings while working on code
+- Renaming variables, refactoring functions, removing "dead" code
+- Adding tests, type hints, or error handling
+- Fixing unrelated bugs noticed in the same file (list them, don't fix them)
+- Expanding a tool's default behavior or parameter set on your own initiative
+
+Scope vs. request specificity:
+
+| Request shape | Default scope |
+|---|---|
+| "Fix bug X" | **Only** X — don't touch related code |
+| "Improve X" | X plus directly related items, listed for review |
+| "Review / optimize file Y" | Whole file, but report by category |
+| Ambiguous request | **Ask** before acting |
+
+These two rules pair: Rule 1 prevents the agent from claiming completion when items are missing; Rule 2 prevents it from inflating the work beyond what was asked. Both rely on the agent surfacing the *evidence of completion* (audit JSON for Rule 1; scope contract + two-section report for Rule 2) rather than self-reporting "done".
+
 ## Tool Reference
 
-**124 tools** across two modes — see the [complete tool reference](TOOLS.md) for details.
+**100+ tools** across two modes — see the [complete tool reference](TOOLS.md) for details.
 
 | Category | Count |
 |----------|-------|
 | Cross-platform (python-docx) | 80 |
 | Windows Live (COM automation) | 44 |
 | macOS Live (JXA automation) | 40 (of the 44 live tools) |
+
+*Counts are rounded; exact registration list lives in `word_document_server/tool_registry.py`.*
 
 ## Requirements
 

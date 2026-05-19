@@ -3,6 +3,27 @@ Tracked changes tools for Word Document Server.
 
 These tools provide MCP interfaces for creating, listing, accepting,
 and rejecting tracked changes in Word documents.
+
+⚠️  DEPRECATED FOR PRODUCTION USE
+---------------------------------
+These tools edit ``<w:ins>`` / ``<w:del>`` OOXML nodes directly via lxml.
+They produce revisions that *look* tracked when the file is closed, but
+on reopen Word may show inconsistent author/timestamp metadata, conflict
+with Word's own w:id allocation, or render the redlines differently
+from native revisions made through the Reviewing pane.
+
+For production workflows, prefer the live (COM/JXA) equivalents which
+use Word's native ``TrackRevisions = True`` engine:
+
+    track_replace        →  word_live_replace_text(track_changes=True)
+    track_insert         →  word_live_insert_text(track_changes=True)
+    track_delete         →  word_live_delete_text(track_changes=True)
+    list_tracked_changes →  word_live_list_revisions
+    accept_*_changes     →  word_live_accept_revisions
+    reject_*_changes     →  word_live_reject_revisions
+
+These cross-platform tools remain available for offline/batch use
+where opening Word is impractical, but expect rough edges.
 """
 
 import json
@@ -28,7 +49,9 @@ async def track_replace(
     new_text: str,
     author: str = DEFAULT_AUTHOR,
 ) -> str:
-    """Replace text content with tracked changes (marks old as deleted, new as inserted).
+    """[DEPRECATED for production: prefer word_live_replace_text(track_changes=True) which uses Word's native revision engine. This tool edits OOXML directly and may produce inconsistent author/id metadata on reopen.]
+
+    Replace text content with tracked changes (marks old as deleted, new as inserted).
     This changes TEXT CONTENT only — it does not change formatting (font, highlight, style).
     To change formatting, use word_live_format_text instead.
 
@@ -67,7 +90,9 @@ async def track_insert(
     insert_text: str,
     author: str = DEFAULT_AUTHOR,
 ) -> str:
-    """Insert text content after a specific string, marked as a tracked insertion.
+    """[DEPRECATED for production: prefer word_live_insert_text(track_changes=True) which uses Word's native revision engine. This tool edits OOXML directly and may produce inconsistent author/id metadata on reopen.]
+
+    Insert text content after a specific string, marked as a tracked insertion.
     This changes TEXT CONTENT only — it does not change formatting.
 
     Args:
@@ -106,7 +131,9 @@ async def track_delete(
     text: str,
     author: str = DEFAULT_AUTHOR,
 ) -> str:
-    """Mark text content as deleted (tracked deletion).
+    """[DEPRECATED for production: prefer word_live_delete_text(track_changes=True) which uses Word's native revision engine. This tool edits OOXML directly and may produce inconsistent author/id metadata on reopen.]
+
+    Mark text content as deleted (tracked deletion).
     This changes TEXT CONTENT only — it does not change formatting.
 
     Args:

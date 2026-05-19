@@ -4,9 +4,23 @@ Footnote and endnote tools for Word Document Server.
 These tools handle footnote and endnote functionality,
 including adding, customizing, and converting between them.
 
-This module combines both standard and robust implementations:
-- String-return functions for backward compatibility
-- Dict-return robust functions for structured responses
+Canonical implementations
+-------------------------
+* **Add footnote** — `add_footnote_robust_tool` (Dict return, full validation).
+* **Delete footnote** — `delete_footnote_robust_tool` (Dict return, orphan cleanup).
+* **Validate** — `validate_footnotes_tool`.
+
+The following entry points are kept for backward compatibility and now
+forward to the canonical implementations above:
+
+    add_footnote_to_document       →  add_footnote_robust (paragraph_index)
+    add_footnote_enhanced          →  add_footnote_robust (paragraph_index)
+    add_footnote_after_text        →  add_footnote_robust (position="after")
+    add_footnote_before_text       →  add_footnote_robust (position="before")
+    delete_footnote_from_document  →  delete_footnote_robust
+
+The string-returning variants are convenient for legacy clients but return
+less information. New code should prefer the `*_robust_tool` versions.
 """
 import os
 from typing import Optional, Dict, Any
@@ -20,6 +34,8 @@ from word_document_server.core.footnotes import (
     get_format_symbols,
     customize_footnote_formatting,
     add_footnote_robust,
+    add_endnote_robust,
+    convert_footnotes_to_endnotes_robust,
     delete_footnote_robust,
     validate_document_footnotes,
     add_footnote_at_paragraph_end  # Compatibility function
@@ -27,217 +43,126 @@ from word_document_server.core.footnotes import (
 
 
 async def add_footnote_to_document(filename: str, paragraph_index: int, footnote_text: str) -> str:
-    """Add a footnote to a specific paragraph in a Word document.
-    
+    """[DEPRECATED — prefer `add_footnote_robust` for richer return + validation.]
+
+    Add a footnote to a specific paragraph in a Word document.
+
+    Now delegates to the robust implementation (was previously a separate
+    legacy path that fell back to inserting a literal "¹" character if
+    python-docx's add_footnote was unavailable — that fallback produced
+    invalid documents and is removed).
+
     Args:
         filename: Path to the Word document
         paragraph_index: Index of the paragraph to add footnote to (0-based)
         footnote_text: Text content of the footnote
     """
     filename = ensure_docx_extension(filename)
-    
-    # Ensure paragraph_index is an integer
+
+    # Validate paragraph_index here so we keep the legacy error string
+    # callers may depend on.
     try:
         paragraph_index = int(paragraph_index)
     except (ValueError, TypeError):
         return "Invalid parameter: paragraph_index must be an integer"
-    
+
     if not os.path.exists(filename):
         return f"Document {filename} does not exist"
-    
-    # Check if file is writeable
+
     is_writeable, error_message = check_file_writeable(filename)
     if not is_writeable:
         return f"Cannot modify document: {error_message}. Consider creating a copy first."
-    
+
     try:
         async with get_file_lock(filename):
-            doc = Document(filename)
-
-            # Validate paragraph index
-            if paragraph_index < 0 or paragraph_index >= len(doc.paragraphs):
-                return f"Invalid paragraph index. Document has {len(doc.paragraphs)} paragraphs (0-{len(doc.paragraphs)-1})."
-
-            paragraph = doc.paragraphs[paragraph_index]
-
-            # In python-docx, we'd use paragraph.add_footnote(), but we'll use a more robust approach
-            try:
-                footnote = paragraph.add_run()
-                footnote.text = ""
-
-                # Create the footnote reference
-                reference = footnote.add_footnote(footnote_text)
-
-                doc.save(filename)
-                return f"Footnote added to paragraph {paragraph_index} in {filename}"
-            except AttributeError:
-                # Fall back to a simpler approach if direct footnote addition fails
-                last_run = paragraph.add_run()
-                last_run.text = "¹"  # Unicode superscript 1
-                last_run.font.superscript = True
-
-                # Add a footnote section at the end if it doesn't exist
-                found_footnote_section = False
-                for p in doc.paragraphs:
-                    if p.text.startswith("Footnotes:"):
-                        found_footnote_section = True
-                        break
-
-                if not found_footnote_section:
-                    doc.add_paragraph("\n").add_run()
-                    doc.add_paragraph("Footnotes:").bold = True
-
-                # Add footnote text
-                footnote_para = doc.add_paragraph("¹ " + footnote_text)
-                footnote_para.style = "Footnote Text" if "Footnote Text" in doc.styles else "Normal"
-
-                doc.save(filename)
-                return f"Footnote added to paragraph {paragraph_index} in {filename} (simplified approach)"
+            success, message, _details = add_footnote_robust(
+                filename=filename,
+                paragraph_index=paragraph_index,
+                footnote_text=footnote_text,
+                validate_location=True,
+            )
+        return message
     except Exception as e:
         return f"Failed to add footnote: {str(e)}"
 
 
 async def add_endnote_to_document(filename: str, paragraph_index: int, endnote_text: str) -> str:
-    """Add an endnote to a specific paragraph in a Word document.
-    
+    """Add a native Word endnote to a specific paragraph.
+
+    Writes a real ``<w:endnoteReference>`` into the paragraph and a matching
+    ``<w:endnote>`` into ``word/endnotes.xml`` (creating the part, content-type
+    override, relationship, and EndnoteReference/EndnoteText styles if they
+    don't yet exist). Word recognises the result as a native endnote — visible
+    in View > Endnotes, accept/reject via the Review pane, renumbered
+    automatically when others are added.
+
+    (Previous versions appended a "†" superscript and a fake "Endnotes:"
+    heading paragraph at the document tail. That was not a real endnote;
+    Word would not number, group, or convert it.)
+
     Args:
         filename: Path to the Word document
         paragraph_index: Index of the paragraph to add endnote to (0-based)
         endnote_text: Text content of the endnote
     """
     filename = ensure_docx_extension(filename)
-    
-    # Ensure paragraph_index is an integer
+
     try:
         paragraph_index = int(paragraph_index)
     except (ValueError, TypeError):
         return "Invalid parameter: paragraph_index must be an integer"
-    
+
     if not os.path.exists(filename):
         return f"Document {filename} does not exist"
-    
-    # Check if file is writeable
+
     is_writeable, error_message = check_file_writeable(filename)
     if not is_writeable:
         return f"Cannot modify document: {error_message}. Consider creating a copy first."
-    
+
     try:
         async with get_file_lock(filename):
-            doc = Document(filename)
-
-            # Validate paragraph index
-            if paragraph_index < 0 or paragraph_index >= len(doc.paragraphs):
-                return f"Invalid paragraph index. Document has {len(doc.paragraphs)} paragraphs (0-{len(doc.paragraphs)-1})."
-
-            paragraph = doc.paragraphs[paragraph_index]
-
-            # Add endnote reference
-            last_run = paragraph.add_run()
-            last_run.text = "†"  # Unicode dagger symbol common for endnotes
-            last_run.font.superscript = True
-
-            # Check if endnotes section exists, if not create it
-            endnotes_heading_found = False
-            for para in doc.paragraphs:
-                if para.text == "Endnotes:" or para.text == "ENDNOTES":
-                    endnotes_heading_found = True
-                    break
-
-            if not endnotes_heading_found:
-                # Add a page break before endnotes section
-                doc.add_page_break()
-                doc.add_heading("Endnotes:", level=1)
-
-            # Add the endnote text
-            endnote_para = doc.add_paragraph("† " + endnote_text)
-            endnote_para.style = "Endnote Text" if "Endnote Text" in doc.styles else "Normal"
-
-            doc.save(filename)
-        return f"Endnote added to paragraph {paragraph_index} in {filename}"
+            success, message, _details = add_endnote_robust(
+                filename=filename,
+                paragraph_index=paragraph_index,
+                endnote_text=endnote_text,
+                validate_location=True,
+            )
+        return message
     except Exception as e:
         return f"Failed to add endnote: {str(e)}"
 
 
 async def convert_footnotes_to_endnotes_in_document(filename: str) -> str:
-    """Convert all footnotes to endnotes in a Word document.
-    
+    """Convert every native footnote in the document to a native endnote.
+
+    Walks ``word/footnotes.xml``, deep-copies each non-separator footnote
+    into ``word/endnotes.xml`` (renaming tags and styles), removes the
+    originals, then rewrites every ``<w:footnoteReference>`` in the body to
+    ``<w:endnoteReference>`` under the new id, flipping the surrounding
+    rStyle from FootnoteReference to EndnoteReference. Endnote part,
+    content-type override, relationship, and EndnoteReference/EndnoteText
+    styles are created if missing.
+
+    (Previous versions scanned for "¹²³..." superscript runs and appended
+    a fake "Endnotes:" heading — that produced documents Word did not
+    recognise as having endnotes.)
+
     Args:
         filename: Path to the Word document
     """
     filename = ensure_docx_extension(filename)
-    
+
     if not os.path.exists(filename):
         return f"Document {filename} does not exist"
-    
-    # Check if file is writeable
+
     is_writeable, error_message = check_file_writeable(filename)
     if not is_writeable:
         return f"Cannot modify document: {error_message}. Consider creating a copy first."
-    
+
     try:
         async with get_file_lock(filename):
-            doc = Document(filename)
-
-            # Find all runs that might be footnote references
-            footnote_references = []
-
-            for para_idx, para in enumerate(doc.paragraphs):
-                for run_idx, run in enumerate(para.runs):
-                    # Check if this run is likely a footnote reference
-                    # (superscript number or special character)
-                    if run.font.superscript and (run.text.isdigit() or run.text in "¹²³⁴⁵⁶⁷⁸⁹"):
-                        footnote_references.append({
-                            "paragraph_index": para_idx,
-                            "run_index": run_idx,
-                            "text": run.text
-                        })
-
-            if not footnote_references:
-                return f"No footnote references found in {filename}"
-
-            # Create endnotes section
-            doc.add_page_break()
-            doc.add_heading("Endnotes:", level=1)
-
-            # Create a placeholder for endnote content, we'll fill it later
-            endnote_content = []
-
-            # Find the footnote text at the bottom of the page
-
-            found_footnote_section = False
-            footnote_text = []
-
-            for para in doc.paragraphs:
-                if not found_footnote_section and para.text.startswith("Footnotes:"):
-                    found_footnote_section = True
-                    continue
-
-                if found_footnote_section:
-                    footnote_text.append(para.text)
-
-            # Create endnotes based on footnote references
-            for i, ref in enumerate(footnote_references):
-                # Add a new endnote
-                endnote_para = doc.add_paragraph()
-
-                # Try to match with footnote text, or use placeholder
-                if i < len(footnote_text):
-                    endnote_para.text = f"†{i+1} {footnote_text[i]}"
-                else:
-                    endnote_para.text = f"†{i+1} Converted from footnote {ref['text']}"
-
-                # Change the footnote reference to an endnote reference
-                try:
-                    paragraph = doc.paragraphs[ref["paragraph_index"]]
-                    paragraph.runs[ref["run_index"]].text = f"†{i+1}"
-                except IndexError:
-                    # Skip if we can't locate the reference
-                    pass
-
-            # Save the document
-            doc.save(filename)
-
-        return f"Converted {len(footnote_references)} footnotes to endnotes in {filename}"
+            success, message, _details = convert_footnotes_to_endnotes_robust(filename=filename)
+        return message
     except Exception as e:
         return f"Failed to convert footnotes to endnotes: {str(e)}"
 
@@ -318,10 +243,12 @@ async def add_footnote_before_text(filename: str, search_text: str, footnote_tex
 
 async def add_footnote_enhanced(filename: str, paragraph_index: int, footnote_text: str,
                                output_filename: Optional[str] = None) -> str:
-    """Enhanced version of add_footnote_to_document with proper superscript formatting.
-    
-    Now uses the robust implementation for better reliability.
-    
+    """[DEPRECATED — same behavior as `add_footnote_robust`; prefer that instead.]
+
+    Originally an "enhanced" upgrade over `add_footnote_to_document`; now both
+    delegate to `add_footnote_robust`, so this entry point exists only for
+    backward compatibility.
+
     Args:
         filename: Path to the Word document
         paragraph_index: Index of the paragraph to add footnote to (0-based)
@@ -472,9 +399,13 @@ async def add_footnote_robust_tool(
 ) -> Dict[str, Any]:
     """
     Add a footnote with robust validation and error handling.
-    
-    This is the production-ready version with comprehensive Word compliance.
-    
+
+    **CANONICAL footnote-add tool — prefer this over `add_footnote_to_document`,
+    `add_footnote_enhanced`, `add_footnote_after_text`, and `add_footnote_before_text`.**
+    Those older entry points either delegate here or exist only for backward
+    compatibility; this one exposes the full feature set (validation, auto-repair,
+    structured Dict response) and gives you ID-level control.
+
     Args:
         filename: Path to the Word document
         search_text: Text to search for (mutually exclusive with paragraph_index)
@@ -674,8 +605,8 @@ async def add_footnote_before_text_robust(
     output_filename: Optional[str] = None
 ) -> str:
     """
-    Robust version of add_footnote_before_text.
-    Note: Current robust implementation defaults to 'after' position.
+    Robust version of add_footnote_before_text — inserts the footnote
+    reference immediately before the matched ``search_text``.
     """
     # Handle output filename
     working_file = filename
@@ -685,13 +616,17 @@ async def add_footnote_before_text_robust(
             shutil.copy2(filename, output_filename)
         working_file = output_filename
 
-    # Lock on working_file acquired inside add_footnote_robust_tool
-    result = await add_footnote_robust_tool(
-        filename=working_file,
-        search_text=search_text,
-        footnote_text=footnote_text
-    )
-    return result["message"]
+    # Call the core robust path directly so we can pass position="before".
+    # add_footnote_robust_tool() does not expose `position`, so we bypass it.
+    async with get_file_lock(working_file):
+        success, message, _details = add_footnote_robust(
+            filename=working_file,
+            search_text=search_text,
+            footnote_text=footnote_text,
+            position="before",
+            validate_location=True,
+        )
+    return message
 
 
 async def delete_footnote_from_document_robust(

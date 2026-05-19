@@ -13,44 +13,128 @@ _MAC_AVAILABLE = sys.platform == 'darwin'
 
 # 1 inch = 72 points (avoid app.InchesToPoints which can fail on some COM setups)
 _PTS_PER_INCH = 72.0
+_PTS_PER_CM = 72.0 / 2.54  # ≈ 28.346 pt/cm
+
+# Sanity ceiling for any single dimension in points (≈ 56 inches).
+# Word's hard limits are 22 in for page, 31.5 in for margin/gutter — this
+# generous ceiling catches obvious unit-mistake bugs (e.g. someone passing
+# 2540 thinking they're in twentieths of a point).
+_MAX_DIMENSION_PT = 4032.0
+
+
+def _resolve_pt(cm: float = None, inches: float = None, label: str = "") -> tuple[float | None, str]:
+    """Pick whichever of cm / inches is given, convert to points, validate.
+
+    Returns (points, source_unit_for_logging). If both given, cm wins and
+    we attach a note to the log. If neither given, returns (None, '').
+    """
+    if cm is None and inches is None:
+        return None, ""
+    if cm is not None and inches is not None:
+        # Prefer cm (regression-safe: callers who set *_cm explicitly want cm)
+        pt = float(cm) * _PTS_PER_CM
+        return pt, f"{label}={cm}cm (inches param ignored — both supplied)"
+    if cm is not None:
+        if cm < 0 or cm * _PTS_PER_CM > _MAX_DIMENSION_PT:
+            raise ValueError(f"{label}={cm}cm is out of plausible range")
+        return float(cm) * _PTS_PER_CM, f"{label}={cm}cm"
+    if inches < 0 or inches * _PTS_PER_INCH > _MAX_DIMENSION_PT:
+        raise ValueError(f"{label}={inches}in is out of plausible range")
+    return float(inches) * _PTS_PER_INCH, f"{label}={inches}in"
 
 
 async def word_live_set_page_layout(
     filename: str = None,
     section_index: int = 1,
     orientation: str = None,
+    # Page size
     page_width_inches: float = None,
     page_height_inches: float = None,
+    page_width_cm: float = None,
+    page_height_cm: float = None,
+    # Margins
     margin_top_inches: float = None,
     margin_bottom_inches: float = None,
     margin_left_inches: float = None,
     margin_right_inches: float = None,
+    margin_top_cm: float = None,
+    margin_bottom_cm: float = None,
+    margin_left_cm: float = None,
+    margin_right_cm: float = None,
+    # Binding / header / footer distance
+    gutter_cm: float = None,
+    gutter_inches: float = None,
+    header_distance_cm: float = None,
+    header_distance_inches: float = None,
+    footer_distance_cm: float = None,
+    footer_distance_inches: float = None,
+    # Section flags
+    different_odd_and_even_pages: bool = None,
+    different_first_page: bool = None,
 ) -> str:
     """Set page layout for a section in an open Word document.
+
+    Units
+    -----
+    Each linear dimension accepts both ``_cm`` and ``_inches`` flavours; pass
+    whichever matches your spec. If both are given for the same dimension,
+    cm wins and a note is attached to the response. Internally all values
+    are converted to Word's native unit (points: 72 pt/in, ~28.35 pt/cm).
+
+    Supported properties
+    --------------------
+    * orientation: "portrait" or "landscape"
+    * page width / height
+    * top / bottom / left / right margins
+    * gutter (binding margin) — useful for two-sided printing
+    * header_distance — distance from page edge to header band
+    * footer_distance — distance from page edge to footer band
+    * different_odd_and_even_pages — section-level toggle for alternating
+      odd/even page headers and footers
+    * different_first_page — section-level toggle for a special first-page
+      header/footer (e.g. cover page)
 
     Args:
         filename: Document name or path (None = active document).
         section_index: Section number (1-indexed, COM style). Default 1.
-        orientation: "portrait" or "landscape".
-        page_width_inches: Page width in inches.
-        page_height_inches: Page height in inches.
-        margin_top_inches: Top margin in inches.
-        margin_bottom_inches: Bottom margin in inches.
-        margin_left_inches: Left margin in inches.
-        margin_right_inches: Right margin in inches.
+        ...: (each dimension can be given in either cm or inches)
 
     Returns:
-        JSON with result info.
+        JSON with ``changes`` (human-readable log) and
+        ``effective_pt`` (dict of every property actually applied in points,
+        suitable for diff-against-spec verification).
     """
     if _MAC_AVAILABLE:
         from word_document_server.core.word_mac import mac_set_page_layout
-        return mac_set_page_layout(filename=filename, section_index=section_index, orientation=orientation, page_width=page_width, page_height=page_height, top_margin=top_margin, bottom_margin=bottom_margin, left_margin=left_margin, right_margin=right_margin)
+        # macOS path doesn't yet honor cm / gutter / header_distance / section flags;
+        # forward only what it supports. (Issue tracked for the JXA backend.)
+        return mac_set_page_layout(
+            filename=filename, section_index=section_index, orientation=orientation,
+            page_width=page_width_inches, page_height=page_height_inches,
+            top_margin=margin_top_inches, bottom_margin=margin_bottom_inches,
+            left_margin=margin_left_inches, right_margin=margin_right_inches,
+        )
 
     if sys.platform != "win32":
         return json.dumps({"error": "Live layout tools are only available on Windows"})
 
     try:
         from word_document_server.core.word_com import get_word_app, find_document, undo_record
+
+        # Resolve every dimension once up-front so unit errors fail before
+        # we open the undo_record (cleaner Ctrl+Z semantics).
+        try:
+            page_width_pt,  page_width_log  = _resolve_pt(page_width_cm,  page_width_inches,  "page_width")
+            page_height_pt, page_height_log = _resolve_pt(page_height_cm, page_height_inches, "page_height")
+            mtop_pt,    mtop_log    = _resolve_pt(margin_top_cm,    margin_top_inches,    "margin_top")
+            mbottom_pt, mbottom_log = _resolve_pt(margin_bottom_cm, margin_bottom_inches, "margin_bottom")
+            mleft_pt,   mleft_log   = _resolve_pt(margin_left_cm,   margin_left_inches,   "margin_left")
+            mright_pt,  mright_log  = _resolve_pt(margin_right_cm,  margin_right_inches,  "margin_right")
+            gutter_pt,  gutter_log  = _resolve_pt(gutter_cm,        gutter_inches,        "gutter")
+            hdist_pt,   hdist_log   = _resolve_pt(header_distance_cm, header_distance_inches, "header_distance")
+            fdist_pt,   fdist_log   = _resolve_pt(footer_distance_cm, footer_distance_inches, "footer_distance")
+        except ValueError as ve:
+            return json.dumps({"error": str(ve)})
 
         app = get_word_app()
         doc = find_document(app, filename)
@@ -60,43 +144,55 @@ async def word_live_set_page_layout(
                 "error": f"Section {section_index} out of range (1-{doc.Sections.Count})"
             })
 
+        effective_pt: dict[str, float | bool] = {}
+        changes: list[str] = []
+
         with undo_record(app, "MCP: Set Page Layout"):
             ps = doc.Sections(section_index).PageSetup
-            changes = []
 
             if orientation is not None:
                 # wdOrientPortrait=0, wdOrientLandscape=1
                 if orientation.lower() == "landscape":
                     ps.Orientation = 1
                     changes.append("orientation=landscape")
+                    effective_pt["orientation"] = "landscape"
                 elif orientation.lower() == "portrait":
                     ps.Orientation = 0
                     changes.append("orientation=portrait")
+                    effective_pt["orientation"] = "portrait"
 
-            if page_width_inches is not None:
-                ps.PageWidth = page_width_inches * _PTS_PER_INCH
-                changes.append(f"width={page_width_inches}in")
-            if page_height_inches is not None:
-                ps.PageHeight = page_height_inches * _PTS_PER_INCH
-                changes.append(f"height={page_height_inches}in")
-            if margin_top_inches is not None:
-                ps.TopMargin = margin_top_inches * _PTS_PER_INCH
-                changes.append(f"margin_top={margin_top_inches}in")
-            if margin_bottom_inches is not None:
-                ps.BottomMargin = margin_bottom_inches * _PTS_PER_INCH
-                changes.append(f"margin_bottom={margin_bottom_inches}in")
-            if margin_left_inches is not None:
-                ps.LeftMargin = margin_left_inches * _PTS_PER_INCH
-                changes.append(f"margin_left={margin_left_inches}in")
-            if margin_right_inches is not None:
-                ps.RightMargin = margin_right_inches * _PTS_PER_INCH
-                changes.append(f"margin_right={margin_right_inches}in")
+            def apply(prop: str, pt_value: float | None, log: str, key: str):
+                if pt_value is not None:
+                    setattr(ps, prop, pt_value)
+                    changes.append(log)
+                    effective_pt[key] = pt_value
+
+            apply("PageWidth",       page_width_pt,  page_width_log,  "page_width_pt")
+            apply("PageHeight",      page_height_pt, page_height_log, "page_height_pt")
+            apply("TopMargin",       mtop_pt,        mtop_log,        "margin_top_pt")
+            apply("BottomMargin",    mbottom_pt,     mbottom_log,     "margin_bottom_pt")
+            apply("LeftMargin",      mleft_pt,       mleft_log,       "margin_left_pt")
+            apply("RightMargin",     mright_pt,      mright_log,      "margin_right_pt")
+            apply("Gutter",          gutter_pt,      gutter_log,      "gutter_pt")
+            apply("HeaderDistance",  hdist_pt,       hdist_log,       "header_distance_pt")
+            apply("FooterDistance",  fdist_pt,       fdist_log,       "footer_distance_pt")
+
+            if different_odd_and_even_pages is not None:
+                ps.OddAndEvenPagesHeaderFooter = bool(different_odd_and_even_pages)
+                changes.append(f"different_odd_and_even_pages={different_odd_and_even_pages}")
+                effective_pt["different_odd_and_even_pages"] = bool(different_odd_and_even_pages)
+
+            if different_first_page is not None:
+                ps.DifferentFirstPageHeaderFooter = bool(different_first_page)
+                changes.append(f"different_first_page={different_first_page}")
+                effective_pt["different_first_page"] = bool(different_first_page)
 
         return json.dumps({
             "success": True,
             "document": doc.Name,
             "section": section_index,
             "changes": changes,
+            "effective_pt": effective_pt,
         })
 
     except Exception as e:
@@ -346,6 +442,22 @@ async def word_live_set_paragraph_spacing(
 ) -> str:
     """Set paragraph spacing and layout properties in an open Word document.
 
+    Line-spacing interpretation (fixed in 1.7.2 — previous releases required
+    you to pre-multiply by 12, which silently produced 1.5-pt fixed spacing
+    when callers passed 1.5):
+
+      * ``line_spacing_rule="multiple"`` — pass a multiplier (1.0, 1.15, 1.5,
+        2.0…). The tool converts to Word COM's required points value as
+        ``multiplier × 12``. Values > 10 are treated as already-points
+        (backward compat for callers who pre-multiplied).
+      * ``line_spacing_rule="exactly"`` / ``"at_least"`` — value is in
+        points (e.g. 18 means literally 18 pt).
+      * ``line_spacing_rule="single"`` / ``"1.5_lines"`` / ``"double"`` —
+        Word computes the points value itself; any ``line_spacing`` you
+        pass is ignored.
+      * ``line_spacing_rule=None`` — inferred: values ≤ 10 use ``"multiple"``
+        (×12 conversion), values > 10 use ``"exactly"`` as-is.
+
     Args:
         filename: Document name or path (None = active document).
         paragraph_index: Single paragraph (1-indexed). Ignored if start/end given.
@@ -353,18 +465,18 @@ async def word_live_set_paragraph_spacing(
         end_paragraph: End of range (1-indexed, inclusive).
         space_before_pt: Space before paragraph in points.
         space_after_pt: Space after paragraph in points.
-        line_spacing: Line spacing value IN POINTS (depends on rule).
-            IMPORTANT: For "multiple" rule, value is in points, NOT a multiplier.
-            Single spacing (1.0) = 12pt. So: 1.15 lines = 13.8pt, 1.5 lines = 18pt,
-            2.0 lines = 24pt. Formula: desired_lines * 12 = points_value.
-        line_spacing_rule: "single"(0), "1.5_lines"(1), "double"(2),
-                           "at_least"(3), "exactly"(4), "multiple"(5).
+        line_spacing: Multiplier or points (see interpretation block above).
+        line_spacing_rule: "single", "1.5_lines", "double", "at_least",
+            "exactly", or "multiple". Defaults to inferred.
         keep_with_next: Keep paragraph with next paragraph on same page (True/False).
         keep_together: Keep all lines of paragraph on same page (True/False).
-        alignment: Paragraph alignment - "left"(0), "center"(1), "right"(2), "justify"(3).
+        alignment: Paragraph alignment - "left", "center", "right", "justify".
 
     Returns:
-        JSON with count of affected paragraphs.
+        JSON with paragraphs_affected and the ``effective_line_spacing_pt`` /
+        ``effective_line_spacing_rule`` we actually applied (useful for
+        diagnosing surprises). On macOS the JXA backend does not yet honor
+        ``line_spacing_rule``; only ``line_spacing`` (as points) is applied.
     """
     if _MAC_AVAILABLE:
         from word_document_server.core.word_mac import mac_set_paragraph_spacing
@@ -390,6 +502,37 @@ async def word_live_set_paragraph_spacing(
             "exactly": 4,
             "multiple": 5,
         }
+        # Word's preset rules ignore the numeric LineSpacing value entirely.
+        PRESET_RULES = {"single", "1.5_lines", "double"}
+
+        # ---- Normalize line_spacing against rule. -----------------------
+        # Word COM Paragraph.LineSpacing is ALWAYS in points. For the
+        # "multiple" rule Word still wants points; the conversion is
+        # multiplier × 12 (12 being Word's single-line baseline). Passing
+        # a raw 1.5 with rule="multiple" gives 1.5-pt fixed line height —
+        # text glues together. We accept the natural multiplier form here
+        # and convert for the caller.
+        effective_rule = line_spacing_rule
+        effective_spacing = line_spacing
+        if line_spacing is not None:
+            if effective_rule in PRESET_RULES:
+                # Preset rules compute their own value; drop user's number
+                # to make behavior predictable.
+                effective_spacing = None
+            elif effective_rule == "multiple":
+                if line_spacing <= 10:
+                    effective_spacing = float(line_spacing) * 12.0
+                # else: assume caller already pre-multiplied (>10 pts)
+            elif effective_rule in ("exactly", "at_least"):
+                effective_spacing = float(line_spacing)  # already points
+            elif effective_rule is None:
+                # Infer rule from magnitude.
+                if line_spacing <= 10:
+                    effective_rule = "multiple"
+                    effective_spacing = float(line_spacing) * 12.0
+                else:
+                    effective_rule = "exactly"
+                    effective_spacing = float(line_spacing)
 
         # Determine range of paragraphs (1-indexed)
         if start_paragraph is not None and end_paragraph is not None:
@@ -411,10 +554,11 @@ async def word_live_set_paragraph_spacing(
                     pf.SpaceBefore = space_before_pt
                 if space_after_pt is not None:
                     pf.SpaceAfter = space_after_pt
-                if line_spacing_rule is not None and line_spacing_rule in rule_map:
-                    pf.LineSpacingRule = rule_map[line_spacing_rule]
-                if line_spacing is not None:
-                    pf.LineSpacing = line_spacing
+                # Rule must be set BEFORE LineSpacing or Word may reinterpret.
+                if effective_rule is not None and effective_rule in rule_map:
+                    pf.LineSpacingRule = rule_map[effective_rule]
+                if effective_spacing is not None:
+                    pf.LineSpacing = effective_spacing
                 if keep_with_next is not None:
                     pf.KeepWithNext = keep_with_next
                 if keep_together is not None:
@@ -429,6 +573,8 @@ async def word_live_set_paragraph_spacing(
             "success": True,
             "document": doc.Name,
             "paragraphs_affected": count,
+            "effective_line_spacing_rule": effective_rule,
+            "effective_line_spacing_pt": effective_spacing,
         })
 
     except Exception as e:
