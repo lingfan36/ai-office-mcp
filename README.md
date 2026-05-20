@@ -10,7 +10,7 @@ PowerPoint · Excel · Word — three first-class MCP integrations bundled in on
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)]()
 [![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-compatible-purple.svg)](https://modelcontextprotocol.io/)
-[![Tools](https://img.shields.io/badge/MCP%20tools-357%20registered-orange.svg)]()
+[![Tools](https://img.shields.io/badge/MCP%20tools-358%20registered-orange.svg)]()
 [![Tests](https://img.shields.io/badge/tests-287%2F287%20passed-brightgreen.svg)]()
 
 [English](#english) | [中文](#中文)
@@ -29,9 +29,9 @@ PowerPoint · Excel · Word — three first-class MCP integrations bundled in on
 |---|---|---:|---|
 | 🎨 **ppt-master-main** | PPT 生成 Skill | 工作流式 | PDF/DOCX/URL → **原生可编辑 PPTX**(真 DrawingML 形状,不是图片) |
 | 📊 **excel** | Excel MCP Server | **152** (Win) / 67 (跨平台) | COM 直驱 Excel,涵盖透视表、切片器、VBA、图表、命名区域、快照撤销 |
-| 📝 **word-mcp-live** | Word MCP Server | **205** | **打开状态下实时编辑**,原生修订标记 + 单步 Ctrl+Z 撤销 |
+| 📝 **word-mcp-live** | Word MCP Server | **206** | **打开状态下实时编辑**,原生修订标记 + 单步 Ctrl+Z 撤销 |
 
-**Windows 全栈 357 个 MCP 工具实测注册成功** — 在公开可见的 MCP 生态中,这是 Office 三件套覆盖最完整的开源组合之一。
+**Windows 全栈 358 个 MCP 工具实测注册成功** — 在公开可见的 MCP 生态中,这是 Office 三件套覆盖最完整的开源组合之一。
 
 ---
 
@@ -49,7 +49,7 @@ $ python benchmarks/bench_startup.py
 | 项目 | 实测注册工具数 | Windows 模式 | 跨平台模式 |
 |---|---:|---:|---:|
 | **excel** (本仓库) | **152** | 151 (COM) + 1 (excel_diff) | 66 (openpyxl) + 1 |
-| **word-mcp-live** (本仓库) | **205** | 全功能 | 核心功能 |
+| **word-mcp-live** (本仓库) | **206** | 全功能 | 核心功能 |
 | Office-Word-MCP-Server (社区主流) | ~50 | — | — |
 | office-powerpoint-mcp-server (社区主流) | ~30 | — | — |
 | haris-musa/excel-mcp-server (社区主流) | ~35 | — | — |
@@ -80,8 +80,8 @@ $ python benchmarks/bench_startup.py
 
 | Server | 冷启动(子进程,3 次中位数) | 工具枚举(进程内) |
 |---|---:|---:|
-| `excel.excel_mcp.main` | **1678 ms** | 1461 ms (152 tools) |
-| `word_document_server.main` | **1214 ms** | 219 ms (205 tools) |
+| `excel.excel_mcp.main` | **1898 ms** | 1859 ms (152 tools) |
+| `word_document_server.main` | **1536 ms** | 263 ms (206 tools) |
 
 > Word 工具枚举更快是因为 Excel 模块预加载了 22 个工具子模块的代码。Cold-start 一次,之后 stdio 服务持续响应。
 
@@ -218,13 +218,13 @@ ai-office-mcp/
 │   ├── skills/ppt-master/    # SKILL.md + 工作流 + 模板
 │   ├── examples/             # 22 个示例项目,309 页
 │   └── docs/                 # 文档、FAQ、技术设计
-├── excel/              # Excel MCP Server (217 tools)
+├── excel/              # Excel MCP Server (152 tools on Windows / 67 cross-platform)
 │   ├── excel_mcp/
 │   │   ├── tools/            # 22 个工具模块
 │   │   ├── core/             # COM 包装 + 快照引擎
 │   │   └── main.py           # FastMCP 入口
 │   └── test_*.py             # 端到端测试
-└── word-mcp-live/      # Word MCP Server (207 tools, ykarapazar, MIT)
+└── word-mcp-live/      # Word MCP Server (206 tools, ykarapazar, MIT)
     ├── word_document_server/
     └── tests/
 ```
@@ -249,20 +249,20 @@ ai-office-mcp/
 
 ## English
 
-**The most complete open-source MCP toolkit for Microsoft Office automation.** Three production-grade projects bundled together — generate native-editable PowerPoint from any source document, drive Excel through 217 COM-backed tools, and edit Word documents *while they're open* with native tracked changes.
+**The most complete open-source MCP toolkit for Microsoft Office automation.** Three production-grade projects bundled together — generate native-editable PowerPoint from any source document, drive Excel through 152 registered tools on Windows, and edit Word documents *while they're open* with native tracked changes.
 
 | Module | Role | MCP Tools (measured) | Highlight |
 |---|---|---:|---|
 | `ppt-master-main` | PPT generation skill | workflow | Native DrawingML output — every shape clickable in PowerPoint |
 | `excel` | Excel MCP server | **152** (Win) / 67 (cross-platform) | COM-driven; pivot tables, slicers, VBA, snapshot undo |
-| `word-mcp-live` | Word MCP server | **205** | Live editing of open documents, native track changes |
+| `word-mcp-live` | Word MCP server | **206** | Live editing of open documents, native track changes |
 
-**Why bundled here**: most published MCP Office servers cover ~30–50 tools per app. This suite ships **357 measured tools** across all three on Windows. Everything runs locally; no document leaves your machine except the LLM call itself. Compatible with Claude Desktop / Claude Code / Cursor / Cline / VS Code Copilot / any MCP-aware client.
+**Why bundled here**: most published MCP Office servers cover ~30–50 tools per app. This suite ships **358 measured tools** across all three on Windows. Everything runs locally; no document leaves your machine except the LLM call itself. Compatible with Claude Desktop / Claude Code / Cursor / Cline / VS Code Copilot / any MCP-aware client.
 
 **Verified test results** (Windows 11 + Office 16.0 + Python 3.13.12, 2026-05-08):
 - Excel: **285 / 285 assertions passed in 41.3s** (3 end-to-end suites)
 - Word: **2 / 2 test suites passed in 11.2s** (formatting + docx→pdf)
-- Cold-start: Excel 1678 ms, Word 1214 ms (3-run median, fresh subprocess)
+- Cold-start: Excel 1898 ms, Word 1536 ms (3-run median, fresh subprocess)
 
 See the Chinese section above for a detailed feature comparison vs. **Microsoft 365 Copilot**, **Gamma / Tome**, and **ChatGPT + Code Interpreter**.
 

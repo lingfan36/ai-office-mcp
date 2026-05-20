@@ -44,8 +44,9 @@ def _count_tools_word():
     cwd = str(ROOT / "word-mcp-live")
     sys.path.insert(0, cwd)
     t = time.perf_counter()
-    from word_document_server.main import mcp, register_tools
-    register_tools()
+    from word_document_server.main import mcp
+    from word_document_server.tool_registry import register_all_tools
+    register_all_tools(mcp)
     elapsed = time.perf_counter() - t
     import asyncio
     tools = asyncio.run(mcp._list_tools())

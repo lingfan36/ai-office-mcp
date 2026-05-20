@@ -7,7 +7,7 @@ commands shown — results are timestamped, not pinned.
 
 | Field | Value |
 |---|---|
-| Date | 2026-05-08 |
+| Date | 2026-05-20 |
 | OS | Windows 11 Home China 10.0.26200 |
 | Python | 3.13.12 |
 | Office COM | Excel 16.0 / Word 16.0 / PowerPoint 16.0 |
@@ -21,8 +21,8 @@ $ python benchmarks/bench_startup.py
 
 | Server | Cold-start (median of 3 fresh subprocesses) | In-process import | Tools registered |
 |---|---:|---:|---:|
-| `excel.excel_mcp.main`        | 1678.1 ms | 1461.1 ms | **152** |
-| `word_document_server.main`   | 1214.1 ms |  219.0 ms | **205** |
+| `excel.excel_mcp.main`        | 1897.7 ms | 1859.1 ms | **152** |
+| `word_document_server.main`   | 1535.8 ms |  262.9 ms | **206** |
 
 PPT skill (workflow-based, not MCP server):
 
